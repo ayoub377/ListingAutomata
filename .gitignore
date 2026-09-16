@@ -1,0 +1,5 @@
+.env
+*.key
+output/*.csv
+output/*.json
+images/hosted/
