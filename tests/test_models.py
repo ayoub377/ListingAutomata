@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from product_catalog import ProductRow, load_products_csv
+from product_catalog import ProductRow, is_primary_photo, load_products_csv
 
 
 def _write_csv(tmp_path: Path, body: str) -> Path:
@@ -46,6 +46,44 @@ def test_an_empty_folder_counts_as_missing(tmp_path: Path) -> None:
     assert load_products_csv(csv_path).missing_photos()
 
 
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        ("chaise_primary.jpeg", True),
+        ("PRIMARY.jpeg", True),  # marker is typed by hand, in whatever case
+        ("IMG_4821-Primary.jpeg", True),
+        ("chaise_kass1.jpeg", False),
+        ("primaire.jpeg", False),
+        ("chaise.primary.jpeg", True),  # marker survives a dotted name
+    ],
+)
+def test_is_primary_photo_reads_the_marker(filename: str, expected: bool) -> None:
+    assert is_primary_photo(Path("/photos/chaise") / filename) is expected
+
+
+def test_primary_photo_finds_the_marked_shot(tmp_path: Path) -> None:
+    folder = _photo_folder(tmp_path, "chaise", "chaise_kass1.jpeg", "chaise_primary.jpeg")
+    row = ProductRow(product_folder=folder, price=1300)
+
+    assert row.primary_photo() == folder / "chaise_primary.jpeg"
+
+
+def test_primary_photo_is_none_when_nothing_is_marked(tmp_path: Path) -> None:
+    """The marker is optional — most folders are just numbered shots."""
+    folder = _photo_folder(tmp_path, "chaise", "chaise_kass1.jpeg", "chaise_kass2.jpeg")
+    row = ProductRow(product_folder=folder, price=1300)
+
+    assert row.primary_photo() is None
+
+
+def test_primary_photo_ignores_a_marked_non_photo(tmp_path: Path) -> None:
+    """It picks from photos(), so a primary.txt next to the shots is not a shot."""
+    folder = _photo_folder(tmp_path, "chaise", "primary.txt", "chaise_kass1.jpeg")
+    row = ProductRow(product_folder=folder, price=1300)
+
+    assert row.primary_photo() is None
+
+
 def test_slug_source_is_the_folder_name(tmp_path: Path) -> None:
     row = ProductRow(product_folder=_photo_folder(tmp_path, "4.6Bestway", "a.jpeg"), price=4300)
 
@@ -72,6 +110,30 @@ def test_the_same_folder_twice_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="listed twice"):
         load_products_csv(csv_path)
+
+
+def test_an_unquoted_comma_is_rejected_instead_of_truncating(tmp_path: Path) -> None:
+    """DictReader would drop the tail, staging the product in half a scene."""
+    folder = _photo_folder(tmp_path, "chaise", "chaise_kass1.jpeg")
+    csv_path = _write_csv(
+        tmp_path,
+        f"product_folder,price,scenery\n{folder},90,forest near a lake, and green grass\n",
+    )
+
+    with pytest.raises(ValueError, match="too many columns"):
+        load_products_csv(csv_path)
+
+
+def test_a_quoted_comma_survives(tmp_path: Path) -> None:
+    folder = _photo_folder(tmp_path, "chaise", "chaise_kass1.jpeg")
+    csv_path = _write_csv(
+        tmp_path,
+        f'product_folder,price,scenery\n{folder},90,"forest near a lake, and green grass"\n',
+    )
+
+    row = load_products_csv(csv_path).rows[0]
+
+    assert row.scenery_description == "forest near a lake, and green grass"
 
 
 def test_a_blank_folder_cell_names_the_column(tmp_path: Path) -> None:

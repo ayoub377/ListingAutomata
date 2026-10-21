@@ -69,6 +69,69 @@ def test_output_path_layout() -> None:
     assert path.parent.parent == segment_script.IMAGES_DIR
 
 
+def test_output_path_files_the_primary_under_its_marker() -> None:
+    path = segment_script.output_path("piscine-bestway-4-6m", segment_script.PRIMARY_MARKER)
+    assert path.name == "product_primary_seg.png"
+
+
+def test_plan_numbers_photos_per_product() -> None:
+    """Two products in one batch each start their own count at 1."""
+    jobs = [
+        ("chaise", Path("chaise/a.jpeg")),
+        ("chaise", Path("chaise/b.jpeg")),
+        ("piscine", Path("piscine/a.jpeg")),
+    ]
+
+    plan = segment_script.plan_destinations(jobs)
+
+    assert [destination.name for _, destination in plan] == [
+        "product_1_seg.png",
+        "product_2_seg.png",
+        "product_1_seg.png",
+    ]
+    assert [destination.parent.name for _, destination in plan] == ["chaise", "chaise", "piscine"]
+
+
+def test_plan_files_the_primary_by_name_and_keeps_the_rest_numbered() -> None:
+    """The primary takes no number, so adding one never renumbers the others."""
+    jobs = [
+        ("chaise", Path("chaise/a.jpeg")),
+        ("chaise", Path("chaise/IMG_4821_PRIMARY.jpeg")),
+        ("chaise", Path("chaise/z.jpeg")),
+    ]
+
+    plan = segment_script.plan_destinations(jobs)
+
+    assert [destination.name for _, destination in plan] == [
+        "product_1_seg.png",
+        "product_primary_seg.png",
+        "product_2_seg.png",
+    ]
+
+
+def test_plan_rejects_two_primaries_in_one_product() -> None:
+    """Both would write product_primary_seg.png, and one cutout would vanish."""
+    jobs = [
+        ("chaise", Path("chaise/primary-front.jpeg")),
+        ("chaise", Path("chaise/primary-side.jpeg")),
+    ]
+
+    with pytest.raises(ValueError, match="two photos marked primary"):
+        segment_script.plan_destinations(jobs)
+
+
+def test_plan_allows_one_primary_per_product() -> None:
+    jobs = [
+        ("chaise", Path("chaise/primary.jpeg")),
+        ("piscine", Path("piscine/primary.jpeg")),
+    ]
+
+    plan = segment_script.plan_destinations(jobs)
+
+    assert [destination.parent.name for _, destination in plan] == ["chaise", "piscine"]
+    assert {destination.name for _, destination in plan} == {"product_primary_seg.png"}
+
+
 def test_load_photo_honours_exif_orientation(tmp_path: Path) -> None:
     """Phone shots carry Orientation=6; ignoring it lists the product on its side."""
     photo = tmp_path / "sideways.jpeg"

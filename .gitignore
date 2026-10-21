@@ -2,4 +2,9 @@
 *.key
 output/*.csv
 output/*.json
+output/*.jsonl
+output/**/*.jpg
 images/hosted/
+/.idea
+/.tokensave
+/__pycache__/**

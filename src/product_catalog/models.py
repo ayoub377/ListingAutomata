@@ -27,6 +27,18 @@ from pydantic import (
 
 
 PHOTO_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp"})
+PRIMARY_MARKER = "primary"
+
+
+def is_primary_photo(path: Path) -> bool:
+    """True when a photo is opted in as the product's primary shot.
+
+    The primary is the one shot the staged scenes are generated from, and it is
+    chosen the only way a phone gallery allows: by renaming the file, e.g.
+    `IMG_4821_primary.jpeg`. It is optional — a folder without one is just a set
+    of numbered photos.
+    """
+    return PRIMARY_MARKER in path.stem.lower()
 
 
 class Availability(StrEnum):
@@ -156,6 +168,14 @@ class ProductRow(BaseModel):
             if child.is_file() and child.suffix.lower() in PHOTO_SUFFIXES
         )
 
+    def primary_photo(self) -> Path | None:
+        """The photo marked primary, or None when the product has no marked shot.
+
+        First in name order wins if several carry the marker; segment.py refuses
+        that folder outright rather than pick, since the cutouts would collide.
+        """
+        return next((photo for photo in self.photos() if is_primary_photo(photo)), None)
+
     def exists(self) -> bool:
         """True when the folder is on disk and holds at least one photo."""
         return bool(self.photos())
@@ -202,6 +222,16 @@ def load_products_csv(path: Path | str = "products.csv") -> ProductBatch:
     rows: list[ProductRow] = []
     problems: list[str] = []
     for line, record in enumerate(records, start=2):
+        if record.get(None):
+            # DictReader files columns past the header under a None key, and the
+            # cleanup below drops them. An unquoted comma in a scenery cell would
+            # otherwise truncate the scene silently, halfway through a sentence.
+            extra = ",".join(str(value) for value in record[None])
+            problems.append(
+                f"{path.name}:{line}: too many columns - wrap any cell containing "
+                f'a comma in double quotes (stray text: "{extra.strip()}")'
+            )
+            continue
         cleaned = {key.strip(): value for key, value in record.items() if key and key.strip()}
         try:
             rows.append(ProductRow.model_validate(cleaned))
@@ -214,3 +244,4 @@ def load_products_csv(path: Path | str = "products.csv") -> ProductBatch:
         raise ValueError("\n".join(problems))
 
     return ProductBatch(source=path, rows=rows)
+
