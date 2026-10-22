@@ -119,7 +119,9 @@ SHOTS = (
     (
         "context",
         "Wider establishing shot with the product sitting naturally in the scene, "
-        "showing much more of the surroundings around it.",
+        "showing much more of the surroundings around it. If the reference shows "
+        "the product's retail box instead of the product itself, show the product "
+        "that the box artwork depicts, fully set up, and leave the box out.",
     ),
 )
 
@@ -131,6 +133,7 @@ class Product(NamedTuple):
     title: str
     scenery: str | None
     aliases: tuple[str, ...] = ()
+    folder: Path | None = None  # the product's photos, for workflow.py to segment from
 
     def answers_to(self, wanted: str) -> bool:
         """True when `wanted` names this product, by output name or photo folder."""
@@ -469,12 +472,13 @@ def products_from_csv(path: Path) -> list[Product]:
                 title=row.title or name.replace("-", " "),
                 scenery=row.scenery_description,
                 aliases=() if folder_alias == name else (folder_alias,),
+                folder=row.product_folder,
             )
         )
     return products
 
 
-def _relative(path: Path) -> str:
+def relative(path: Path) -> str:
     try:
         return str(path.relative_to(PROJECT_ROOT))
     except ValueError:
@@ -519,7 +523,7 @@ async def run_generation(jobs: list[Job], api_key: str, concurrency: int, log: P
                 return None
             job.destination.parent.mkdir(parents=True, exist_ok=True)
             job.destination.write_bytes(image)
-            print(f"wrote  {_relative(job.destination)}  {len(image) / 1024:.0f} KB")
+            print(f"wrote  {relative(job.destination)}  {len(image) / 1024:.0f} KB")
             return job.name
 
     timeout = httpx.Timeout(300.0, connect=30.0)
@@ -550,9 +554,9 @@ async def run_hosting(names: list[str], api_key: str, concurrency: int, log: Pat
             try:
                 url = await host(client, path, name, api_key, log)
             except (OSError, ValueError) as error:
-                print(f"host failed {_relative(path)}: {error}", file=sys.stderr)
+                print(f"host failed {relative(path)}: {error}", file=sys.stderr)
                 return None
-            print(f"hosted {_relative(path)}  {url}")
+            print(f"hosted {relative(path)}  {url}")
             return name, shot, path.name, url
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=30.0)) as client:
@@ -654,7 +658,7 @@ def main(argv: list[str] | None = None) -> int:
         source = cutout_name(product)
         if source is None:
             looked = ", ".join(
-                _relative(cutout_dir(name)) for name in (product.name, *product.aliases)
+                relative(cutout_dir(name)) for name in (product.name, *product.aliases)
             )
             print(
                 f"skip   {product.name} (no cutouts in {looked} - run scripts/segment.py first)",
@@ -668,7 +672,7 @@ def main(argv: list[str] | None = None) -> int:
     pending = []
     for job in plan_generations(ready):
         if job.destination.exists() and not args.force:
-            print(f"skip   {_relative(job.destination)} (exists, --force to redo)")
+            print(f"skip   {relative(job.destination)} (exists, --force to redo)")
             continue
         pending.append(job)
 
@@ -680,7 +684,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.dry_run:
         for job in pending:
-            print(f"\n  {_relative(job.destination)}\n    {job.prompt}")
+            print(f"\n  {relative(job.destination)}\n    {job.prompt}")
         return 0
 
     if not openrouter_key:
@@ -701,7 +705,7 @@ def main(argv: list[str] | None = None) -> int:
     failures = len(pending) - sum(
         1 for job in pending if job.name in generated and job.destination.is_file()
     )
-    print(f"log    {_relative(args.log)}")
+    print(f"log    {relative(args.log)}")
 
     if args.no_host or not generated:
         return 1 if failures else 0

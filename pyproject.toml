@@ -20,6 +20,10 @@ dependencies = [
     "torch>=2.14.0",
     "torchvision>=0.29.0",
     "transformers>=5.17.0",
+    "langchain>=1.4.6",
+    "langchain-openrouter>=0.2.9",
+    "langgraph>=1.0.0",
+    "langsmith>=0.4.0",
 ]
 
 [build-system]

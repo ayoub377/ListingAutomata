@@ -12,6 +12,7 @@ from product_catalog.models import (
     load_products_csv,
 )
 from product_catalog.naming import product_name, slugify
+from product_catalog.tracing import flush, new_batch_id, redact_images, run_config
 
 __all__ = [
     "PHOTO_SUFFIXES",
@@ -22,8 +23,12 @@ __all__ = [
     "MetaListing",
     "ProductBatch",
     "ProductRow",
+    "flush",
     "is_primary_photo",
     "load_products_csv",
+    "new_batch_id",
     "product_name",
+    "redact_images",
+    "run_config",
     "slugify",
 ]
