@@ -1,0 +1,56 @@
+INFO:__main__:Started
+INFO:root: the key is pv_live_IdREME78gQiu7U88QVBTyCHXDcsi0yow
+INFO:httpx:HTTP Request: POST https://api.pixelvault.dev/v1/images "HTTP/1.1 401 Unauthorized"
+INFO:httpx:HTTP Request: POST https://api.pixelvault.dev/v1/images "HTTP/1.1 401 Unauthorized"
+INFO:httpx:HTTP Request: POST https://api.pixelvault.dev/v1/images "HTTP/1.1 401 Unauthorized"
+INFO:__main__:Started
+INFO:root: the key is pv_live_IdREME78gQiu7U88QVBTyCHXDcsi0yow
+INFO:httpx:HTTP Request: POST https://api.pixelvault.dev/v1/images "HTTP/1.1 401 Unauthorized"
+INFO:httpx:HTTP Request: POST https://api.pixelvault.dev/v1/images "HTTP/1.1 401 Unauthorized"
+INFO:__main__:Started
+INFO:root: the key is pv_live_IdREME78gQiu7U88QVBTyCHXDcsi0yow
+INFO:httpx:HTTP Request: POST https://api.pixelvault.dev/v1/images "HTTP/1.1 401 Unauthorized"
+INFO:httpx:HTTP Request: POST https://api.pixelvault.dev/v1/images "HTTP/1.1 401 Unauthorized"
+INFO:httpx:HTTP Request: POST https://api.pixelvault.dev/v1/images "HTTP/1.1 401 Unauthorized"
+INFO:__main__:Started
+INFO:root: the key is pv_live_IdREME78gQiu7U88QVBTyCHXDcsi0yow
+INFO:__main__:Started
+INFO:root: the key is pv_live_PLHzkitOG3Cc25KlUigh5op3vFql54Ab
+INFO:httpx:HTTP Request: POST https://api.pixelvault.dev/v1/images "HTTP/1.1 201 Created"
+INFO:httpx:HTTP Request: POST https://api.pixelvault.dev/v1/images "HTTP/1.1 201 Created"
+INFO:httpx:HTTP Request: POST https://api.pixelvault.dev/v1/images "HTTP/1.1 201 Created"
+INFO:httpx:HTTP Request: POST https://api.pixelvault.dev/v1/images "HTTP/1.1 201 Created"
+INFO:httpx:HTTP Request: POST https://api.pixelvault.dev/v1/images "HTTP/1.1 201 Created"
+INFO:httpx:HTTP Request: POST https://api.pixelvault.dev/v1/images "HTTP/1.1 201 Created"
+INFO:__main__:Started
+INFO:root: the key is pv_live_PLHzkitOG3Cc25KlUigh5op3vFql54Ab
+INFO:httpx:HTTP Request: POST https://graph.facebook.com/v27.0/1494972258775164/items_batch "HTTP/1.1 200 OK"
+INFO:__main__:Started
+INFO:root: the key is pv_live_PLHzkitOG3Cc25KlUigh5op3vFql54Ab
+INFO:httpx:HTTP Request: POST https://graph.facebook.com/v27.0/1494972258775164/items_batch "HTTP/1.1 200 OK"
+INFO:__main__:Started
+INFO:root: the key is pv_live_PLHzkitOG3Cc25KlUigh5op3vFql54Ab
+INFO:__main__:Started
+INFO:root: the key is pv_live_PLHzkitOG3Cc25KlUigh5op3vFql54Ab
+INFO:__main__:Started
+INFO:root: the key is pv_live_PLHzkitOG3Cc25KlUigh5op3vFql54Ab
+INFO:httpx:HTTP Request: POST https://graph.facebook.com/v27.0/1494972258775164/items_batch "HTTP/1.1 200 OK"
+INFO:__main__:Started
+INFO:root: the key is pv_live_PLHzkitOG3Cc25KlUigh5op3vFql54Ab
+INFO:httpx:HTTP Request: POST https://graph.facebook.com/v27.0/1494972258775164/items_batch "HTTP/1.1 200 OK"
+INFO:__main__:Started
+INFO:root: the key is pv_live_PLHzkitOG3Cc25KlUigh5op3vFql54Ab
+INFO:httpx:HTTP Request: POST https://graph.facebook.com/v27.0/1494972258775164/items_batch "HTTP/1.1 200 OK"
+INFO:__main__:Started
+INFO:root: the key is pv_live_PLHzkitOG3Cc25KlUigh5op3vFql54Ab
+INFO:httpx:HTTP Request: POST https://graph.facebook.com/v27.0/1494972258775164/items_batch "HTTP/1.1 200 OK"
+INFO:__main__:Started
+INFO:root: the key is pv_live_PLHzkitOG3Cc25KlUigh5op3vFql54Ab
+INFO:httpx:HTTP Request: POST https://graph.facebook.com/v27.0/1494972258775164/items_batch "HTTP/1.1 200 OK"
+INFO:__main__:Started
+INFO:root: the key is pv_live_PLHzkitOG3Cc25KlUigh5op3vFql54Ab
+INFO:httpx:HTTP Request: POST https://graph.facebook.com/v27.0/1494972258775164/items_batch "HTTP/1.1 200 OK"
+INFO:__main__:Started
+INFO:root: the key is pv_live_PLHzkitOG3Cc25KlUigh5op3vFql54Ab
+INFO:httpx:HTTP Request: POST https://graph.facebook.com/v27.0/1494972258775164/items_batch "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET https://graph.facebook.com/v27.0/1494972258775164/check_batch_request_status?handle=AcxGDWTYljOtMz8Bl4AfMZGWVAKWJhDEmnzsfLWr1jfCOHpRpSqrXkhMuouhIRxbo2vB95aGg3acDytolYISIURW&load_ids_of_invalid_requests=true "HTTP/1.1 200 OK"

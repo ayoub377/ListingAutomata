@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from PIL import Image, ImageOps
+from dotenv import load_dotenv, find_dotenv
 
 from product_catalog import (
     PRIMARY_MARKER,
@@ -125,6 +126,7 @@ SHOTS = (
     ),
 )
 
+load_dotenv(dotenv_path=find_dotenv(), override=True, verbose=True)
 
 class Product(NamedTuple):
     """One product to stage: what to call it, and where to put it."""
@@ -492,13 +494,7 @@ def load_keys() -> tuple[str | None, str | None]:
     every tutorial spell it `OPENROUTER_API_KEY`. Accept both, so a tidy-up rename
     does not read as a missing key.
     """
-    try:
-        from dotenv import load_dotenv
-
-        load_dotenv(PROJECT_ROOT / ".env")
-    except ImportError:  # env vars may still be exported by the shell
-        pass
-    openrouter = os.environ.get("OPEN_ROUTER_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
+    openrouter = os.getenv("OPEN_ROUTER_API_KEY") or os.getenv("OPENROUTER_API_KEY")
     return openrouter or None, os.environ.get("PIXELVAULT_API_KEY") or None
 
 

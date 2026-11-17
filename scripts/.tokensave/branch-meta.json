@@ -1,0 +1,10 @@
+{
+  "default_branch": "addingAdsmanagement",
+  "branches": {
+    "addingAdsmanagement": {
+      "db_file": "tokensave.db",
+      "created_at": "1794922175",
+      "last_synced_at": "1794922175"
+    }
+  }
+}

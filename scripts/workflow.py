@@ -446,6 +446,8 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         flush()  # traces upload in the background; don't exit before the last ones go
     print(f"{succeeded} done, {failed} failed, {len(missing)} skipped")
+    # print(f"Now pushing {succeeded} into the meta catalogue")
+    # #
     return 1 if failed or missing else 0
 
 
