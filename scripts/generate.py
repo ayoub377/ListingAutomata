@@ -104,6 +104,15 @@ PACKAGING = (
     "fully set up, and leave out the box, its wrapping, and every person, prop and "
     "graphic printed on it."
 )
+# A colour variant is made from the one photo the seller has, so the fidelity rule above
+# ("same colour") has to be told, in the same breath, that colour is the one exception.
+# Everything but the main colour stays pinned to the reference.
+RECOLOR = (
+    "Exception to the rule above: this is the {color} version of the product. Change "
+    "only the colour of the product's main fabric, body or shell to {color}. Keep its "
+    "shape, parts, trim, stitching, markings and every other detail exactly as in the "
+    "reference, in the reference's own colours."
+)
 # "No text" used to sit here next to "match the markings exactly". The two
 # contradict, and the model resolved it by garbling the product's own printing
 # ("Fast Set" came out as "Eltat Scm", "Bestway" as "BESTWAX").
@@ -166,10 +175,18 @@ class Product(NamedTuple):
     scenery: str | None
     aliases: tuple[str, ...] = ()
     folder: Path | None = None  # the product's photos, for workflow.py to segment from
+    color: str | None = None  # this listing's colour, for a variant or a single-colour product
+    photo_color: str | None = None  # the colour the product has in its photos
+    group: str | None = None  # the product a colour variant belongs to; None for a single listing
 
     def answers_to(self, wanted: str) -> bool:
         """True when `wanted` names this product, by output name or photo folder."""
         return wanted == self.name or wanted in self.aliases
+
+    @property
+    def recolor(self) -> str | None:
+        """The colour this listing's photos must be recoloured to, if any."""
+        return recolor_target(self.color, self.photo_color)
 
 
 class Job(NamedTuple):
@@ -265,18 +282,37 @@ def data_url(path: Path) -> str:
 # --------------------------------------------------------------------------
 
 
+def recolor_target(color: str | None, photo_color: str | None) -> str | None:
+    """The colour to recolour the reference to, or None when the photo already shows it.
+
+    `Vert` and `vert ` are the same colour. A product with no colour, or one whose
+    photo is already that colour, is staged exactly as photographed.
+    """
+    if not color or slugify(color) == slugify(photo_color or ""):
+        return None
+    return color
+
+
 def build_prompt(
-    title: str, scenery: str | None, instruction: str, note: str | None = None
+    title: str,
+    scenery: str | None,
+    instruction: str,
+    note: str | None = None,
+    color: str | None = None,
 ) -> str:
     """The text half of one request - the only place prompt wording lives.
 
     The scene clause is emphatic on purpose: the first run returned plain white
     backgrounds, so the setting is now stated as the point of the image rather
     than mentioned in passing. `note` is a reviewer's correction from the review
-    app; it goes last, where it cannot be buried under the standing rules.
+    app; it goes last, where it cannot be buried under the standing rules. `color` is
+    a colour to recolour the reference to (see `recolor_target`).
     """
     scene = SCENE_TEMPLATE.format(scenery=scenery.strip().rstrip(".")) if scenery else WHITE_BACKDROP
-    parts = [QUALITY, f"Subject: {title}.", FIDELITY, PACKAGING, instruction, scene, FRAMING, TEXT, CLEANUP]
+    parts = [QUALITY, f"Subject: {title}.", FIDELITY]
+    if color:
+        parts.append(RECOLOR.format(color=color.strip()))
+    parts += [PACKAGING, instruction, scene, FRAMING, TEXT, CLEANUP]
     if note and note.strip():
         parts.append(REVIEWER_NOTE.format(note=note.strip()))
     return " ".join(parts)
@@ -328,7 +364,7 @@ def plan_generations(products: list[Product]) -> list[Job]:
         Job(
             product.name,
             shot,
-            build_prompt(product.title, product.scenery, instruction),
+            build_prompt(product.title, product.scenery, instruction, color=product.recolor),
             output_path(product.name, shot),
         )
         for product in products
@@ -492,25 +528,30 @@ def merge_manifest(manifest: dict, shot: str, file: str, url: str) -> dict:
 
 
 def products_from_csv(path: Path) -> list[Product]:
-    """One Product per CSV row, aliased to its photo folder's name.
+    """One Product per listing: a CSV row, or one per colour when the row has `colors`.
 
     The alias matters: segment.py run with --folder files cutouts under the
     folder's name, while a CSV row is named after its title. `images/chaise/`
     and the row `Chaise Camping` are the same product, and --name must find it
-    either way or the scenery silently goes missing.
+    either way or the scenery silently goes missing. A colour variant is also
+    known by its product's name, since all its colours stage from the same cutouts.
     """
-    batch = load_products_csv(path)
     products = []
-    for row in batch.rows:
+    for row in load_products_csv(path).listings():
         name = product_name(row)
-        folder_alias = slugify(row.product_folder.name)
+        base = row.group or name
+        folder_name = slugify(row.product_folder.name)
+        candidates = (row.group, folder_name) if row.group else (folder_name,)
         products.append(
             Product(
                 name=name,
-                title=row.title or name.replace("-", " "),
+                title=row.title or base.replace("-", " "),
                 scenery=row.scenery_description,
-                aliases=() if folder_alias == name else (folder_alias,),
+                aliases=tuple(dict.fromkeys(alias for alias in candidates if alias and alias != name)),
                 folder=row.product_folder,
+                color=row.color,
+                photo_color=row.staged_from_color,
+                group=row.group,
             )
         )
     return products

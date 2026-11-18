@@ -187,3 +187,56 @@ def test_from_row_reports_what_is_still_missing(tmp_path: Path) -> None:
 
     missing = {issue["loc"][0] for issue in error.value.errors()}
     assert missing == {"title", "description", "link"}
+
+
+# --------------------------------------------------------------------------
+# Colour variants
+# --------------------------------------------------------------------------
+
+
+def test_a_variant_carries_its_group_and_colour_into_both_formats() -> None:
+    listing = _meta(id="chaise-camping-vert", item_group_id="chaise-camping", color="vert")
+
+    feed = listing.to_feed_row()
+    data = listing.to_batch_request()["data"]
+
+    assert (feed["item_group_id"], feed["color"]) == ("chaise-camping", "vert")
+    assert (data["item_group_id"], data["color"]) == ("chaise-camping", "vert")
+    assert {"item_group_id", "color"} <= set(MetaListing.feed_columns)
+
+
+def test_a_plain_listing_sends_no_variant_fields() -> None:
+    listing = _meta()
+
+    data = listing.to_batch_request()["data"]
+
+    assert "item_group_id" not in data and "color" not in data
+    assert (listing.to_feed_row()["item_group_id"], listing.to_feed_row()["color"]) == ("", "")
+
+
+def test_a_single_colour_listing_sends_its_colour_and_no_group() -> None:
+    data = _meta(color="vert").to_batch_request()["data"]
+
+    assert data["color"] == "vert"
+    assert "item_group_id" not in data
+
+
+def test_a_grouped_listing_without_a_colour_is_refused() -> None:
+    """Meta's guide calls a parent row with an empty colour the wrong way to set variants up."""
+    with pytest.raises(ValidationError, match="needs its colour"):
+        _meta(item_group_id="chaise-camping")
+
+
+def test_from_row_takes_the_colour_and_group_from_a_variant(tmp_path: Path) -> None:
+    row = ProductRow(product_folder=tmp_path / "chaise", title="Chaise Camping", price=90, colors="vert; bleu")
+    variant = row.variants()[1]
+
+    listing = MetaListing.from_row(
+        variant,
+        id="chaise-camping-bleu",
+        description="Chaise pliante.",
+        link="https://example.com/chaise",
+        image_urls=["https://img.example.com/1.jpg"],
+    )
+
+    assert (listing.color, listing.item_group_id) == ("bleu", "chaise-camping")

@@ -58,10 +58,30 @@ This payload is sent to `POST /{catalog_id}/items_batch` (`item_type=PRODUCT_ITE
 Header row exactly:
 
 ```
-id,title,description,availability,condition,price,link,image_link,additional_image_link,brand,google_product_category
+id,title,description,availability,condition,price,link,image_link,additional_image_link,brand,google_product_category,item_group_id,color
 ```
 
 One row per product. Quote any field containing commas. UTF-8, no BOM. This file uploads directly in Commerce Manager → Catalog → Data sources → Data feed → Upload file.
+
+## Colour variants
+
+A product that comes in several colours is one listing per colour, tied together by `item_group_id`
+(same field name in the feed and in the Batch API `data` object; `color` likewise).
+
+- `id` stays unique per colour: `chaise-camping-vert`, `chaise-camping-bleu`.
+- `item_group_id` is the product's name and is identical on every colour: `chaise-camping`.
+- Every listing in a group must fill in `color`. Meta calls a "parent" row with an empty colour the
+  wrong way to set variants up, so `MetaListing` refuses a grouped listing without one.
+- Title is the same on every colour (Meta's own example does this, so the name does not change when a
+  shopper picks a colour); the colour lives in the `color` field and in each variant's photos.
+- A single-colour product may send `color` with no `item_group_id`.
+- Limits: `item_group_id` 100 chars; `color` 100 (Batch API) / 200 (feed), so 100 is used.
+
+Source: Meta's product-variants guide and catalog reference, checked 2026-11-18. Meta's Batch API page
+lists `title` at 100 and `description` at 5000 characters, while the feed page says 200 and 9999; this
+project enforces the feed limits.
+
+In `products.csv` this is the `colors` column (`vert; bleu; rouge`), plus optional `photo_color`.
 
 ## Validation before writing
 

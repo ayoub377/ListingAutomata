@@ -657,3 +657,149 @@ def test_regenerate_description_needs_a_reference_and_an_image(folders) -> None:
     _cutout(folders, "chaise")
     with pytest.raises(ValueError, match="no staged images"):
         asyncio.run(workflow.regenerate_description("chaise", "Chaise", None, llm))
+
+
+# --------------------------------------------------------------------------
+# Colour variants
+# --------------------------------------------------------------------------
+
+
+def _variant_product(folders: Path, color: str, photo_color: str | None = "vert") -> generate.Product:
+    photos = folders / "photos"
+    photos.mkdir(exist_ok=True)
+    return generate.Product(
+        name=f"chaise-camping-{color}",
+        title="Chaise Camping",
+        scenery="a forest",
+        aliases=("chaise-camping", "chaise"),
+        folder=photos,
+        color=color,
+        photo_color=photo_color,
+        group="chaise-camping",
+    )
+
+
+def test_plan_inputs_keeps_each_colour_in_its_own_folder_but_shares_the_cutouts(folders) -> None:
+    _cutout(folders, "chaise-camping")  # images/chaise-camping/: made once for the whole product
+    products = [_variant_product(folders, "vert"), _variant_product(folders, "bleu")]
+
+    inputs, missing = workflow.plan_inputs(products, ["angle"], False)
+
+    assert missing == []
+    assert [state["name"] for state in inputs] == ["chaise-camping-vert", "chaise-camping-bleu"]
+    assert {state["cutouts"] for state in inputs} == {"chaise-camping"}
+    assert [(state["color"], state["photo_color"]) for state in inputs] == [("vert", "vert"), ("bleu", "vert")]
+
+
+def test_a_variants_cutouts_default_to_its_products_name_when_none_exist_yet(folders) -> None:
+    inputs, _ = workflow.plan_inputs([_variant_product(folders, "vert")], ["angle"], False)
+
+    assert inputs[0]["cutouts"] == "chaise-camping"  # segmented into the product's folder, not its own
+    assert inputs[0]["name"] == "chaise-camping-vert"
+
+
+def test_a_plain_product_state_has_none_of_the_variant_keys(folders) -> None:
+    _cutout(folders, "chaise-camping")
+    photos = folders / "photos"
+    photos.mkdir()
+    plain = generate.Product(name="chaise-camping", title="Chaise Camping", scenery=None, folder=photos)
+
+    (state,), _ = workflow.plan_inputs([plain], ["angle"], False)
+
+    assert not {"cutouts", "color", "photo_color"} & set(state)
+
+
+def test_variants_stage_from_the_shared_cutouts_and_only_recolour_the_ones_that_need_it(folders, monkeypatch) -> None:
+    reference = _cutout(folders, "chaise-camping")
+    seen: dict[str, dict] = {}
+
+    async def fake_generate(client, job, references, api_key, log):
+        seen[job.name] = {"prompt": job.prompt, "references": references}
+        return b"image-" + job.name.encode()
+
+    monkeypatch.setattr(generate, "generate", fake_generate)
+
+    for color in ("vert", "bleu"):
+        asyncio.run(
+            workflow.make_generate_image("key")(
+                {
+                    "name": f"chaise-camping-{color}",
+                    "cutouts": "chaise-camping",
+                    "title": "Chaise Camping",
+                    "shots": ["angle"],
+                    "color": color,
+                    "photo_color": "vert",
+                }
+            )
+        )
+
+    assert generate.output_path("chaise-camping-vert", "angle").read_bytes() == b"image-chaise-camping-vert"
+    assert generate.output_path("chaise-camping-bleu", "angle").read_bytes() == b"image-chaise-camping-bleu"
+    assert not generate.output_path("chaise-camping", "angle").exists()  # nothing filed under the product itself
+    assert all(call["references"] == [reference] for call in seen.values())
+    assert "version of the product" not in seen["chaise-camping-vert"]["prompt"]  # the photo is already green
+    assert "this is the bleu version" in seen["chaise-camping-bleu"]["prompt"]
+
+
+def test_a_variant_with_no_cutouts_anywhere_is_segmented_into_its_products_folder(folders, monkeypatch) -> None:
+    segmented: list[str] = []
+
+    def fake_segment_photos(name: str, folder: Path, resolution: int = 1024) -> list[Path]:
+        segmented.append(name)
+        return [_cutout(folders, name)]
+
+    async def fake_generate(client, job, references, api_key, log):
+        return b"image"
+
+    monkeypatch.setattr(workflow, "segment_photos", fake_segment_photos)
+    monkeypatch.setattr(generate, "generate", fake_generate)
+
+    asyncio.run(
+        workflow.make_generate_image("key")(
+            {
+                "name": "chaise-camping-bleu",
+                "cutouts": "chaise-camping",
+                "title": "Chaise Camping",
+                "shots": ["angle"],
+                "folder": folders / "photos",
+                "color": "bleu",
+            }
+        )
+    )
+
+    assert segmented == ["chaise-camping"]  # the cutouts are the product's, not the variant's
+
+
+def test_the_description_request_names_the_colour_of_the_variant(tmp_path: Path) -> None:
+    reference, shot = _jpeg(tmp_path / "ref.jpg"), _jpeg(tmp_path / "shot.jpg")
+
+    plain = workflow.build_description_messages("Chaise", reference, [shot])[1].content[0]["text"]
+    coloured = workflow.build_description_messages("Chaise", reference, [shot], color=" bleu ")[1].content[0]["text"]
+
+    assert "version" not in plain
+    assert coloured.startswith(plain)
+    assert "This listing is the bleu version" in coloured
+    assert "may show the product in another colour" in coloured
+
+
+def test_find_cutouts_returns_the_first_name_that_has_them(folders) -> None:
+    _cutout(folders, "chaise-camping")
+
+    assert workflow.find_cutouts("chaise-camping-bleu", None, "chaise-camping", "chaise") == "chaise-camping"
+    assert workflow.find_cutouts("nothing", None) is None
+
+
+def test_regenerating_a_variants_description_reads_the_shared_cutouts_and_names_the_colour(folders) -> None:
+    _cutout(folders, "chaise-camping")
+    _jpeg(generate.output_path("chaise-camping-bleu", "angle"))
+    llm = FakeLLM(workflow.Description(french="Chaise bleue.", arabic="كرسي أزرق."))
+
+    asyncio.run(
+        workflow.regenerate_description(
+            "chaise-camping-bleu", "Chaise Camping", None, llm, cutouts="chaise-camping", color="bleu"
+        )
+    )
+
+    assert "This listing is the bleu version" in llm.writer.messages[1].content[0]["text"]
+    saved = json.loads(workflow.description_path("chaise-camping-bleu").read_text(encoding="utf-8"))
+    assert saved["fr"] == "Chaise bleue."

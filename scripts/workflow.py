@@ -78,6 +78,10 @@ DESCRIPTION_INSTRUCTION = (
 )
 
 
+DESCRIPTION_COLOR = (
+    "\n\nThis listing is the {color} version. The reference photo may show the product "
+    "in another colour: describe it in {color}, as the staged photos show it."
+)
 DESCRIPTION_NOTE = (
     "\n\nA reviewer rejected the previous description. Fix exactly this and keep "
     "every other rule above: {note}"
@@ -101,6 +105,9 @@ class CatalogState(TypedDict, total=False):
     shots: list[str]  # which shots to stage; every shot in generate.SHOTS when omitted
     force: bool
     note: str | None  # a reviewer's correction, added to the image prompt or description request
+    color: str | None  # this listing's colour: recoloured in the image, named in the description
+    photo_color: str | None  # the colour the product has in its photos; no recolour when it matches
+    cutouts: str | None  # the cutout folder, when it is not `name` (colour variants share one)
     references: list[Path]
     generated_images: list[Path]  # in shot order, hero first
     description_fr: str
@@ -202,7 +209,11 @@ def make_generate_image(api_key: str, log: Path | None = None):
             return destination
         instruction = dict(generate.SHOTS)[shot]
         prompt = generate.build_prompt(
-            state["title"], state.get("scenery"), instruction, note=state.get("note")
+            state["title"],
+            state.get("scenery"),
+            instruction,
+            note=state.get("note"),
+            color=generate.recolor_target(state.get("color"), state.get("photo_color")),
         )
         image = await render(state["name"], shot, prompt, [str(path) for path in references])
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -210,16 +221,18 @@ def make_generate_image(api_key: str, log: Path | None = None):
         return destination
 
     async def generate_image(state: CatalogState) -> CatalogState:
-        name = state["name"]
+        # Every colour of a product stages from the same cutouts, so they are looked up
+        # (and, if missing, made) under the product's name, not each variant's own.
+        source = state.get("cutouts") or state["name"]
         shots = state.get("shots") or ALL_SHOTS
-        references = generate.reference_cutouts(name)
+        references = generate.reference_cutouts(source)
         if not references:
             if not state.get("folder"):
                 raise ValueError(
-                    f"no cutouts in {generate.cutout_dir(name)} and no product folder "
+                    f"no cutouts in {generate.cutout_dir(source)} and no product folder "
                     f"to segment them from"
                 )
-            references = await ensure_cutouts(name, str(state["folder"]))
+            references = await ensure_cutouts(source, str(state["folder"]))
 
         # Every shot of the product from the same references, so they stay one product.
         images = await asyncio.gather(*(stage(state, shot, references) for shot in shots))
@@ -229,7 +242,11 @@ def make_generate_image(api_key: str, log: Path | None = None):
 
 
 def build_description_messages(
-    title: str, reference: Path, generated: list[Path], note: str | None = None
+    title: str,
+    reference: Path,
+    generated: list[Path],
+    note: str | None = None,
+    color: str | None = None,
 ) -> list[SystemMessage | HumanMessage]:
     """The vision request: title text, then the reference, then every staged image.
 
@@ -237,6 +254,8 @@ def build_description_messages(
     the last thing the model reads.
     """
     instruction = DESCRIPTION_INSTRUCTION.format(title=title)
+    if color and color.strip():
+        instruction += DESCRIPTION_COLOR.format(color=color.strip())
     if note and note.strip():
         instruction += DESCRIPTION_NOTE.format(note=note.strip())
     return [
@@ -264,7 +283,11 @@ def make_write_description(llm):
 
     async def write_description(state: CatalogState) -> CatalogState:
         messages = build_description_messages(
-            state["title"], state["references"][0], state["generated_images"], state.get("note")
+            state["title"],
+            state["references"][0],
+            state["generated_images"],
+            state.get("note"),
+            state.get("color"),
         )
         result = await writer.ainvoke(messages)
         return {"description_fr": result.french, "description_ar": result.arabic}
@@ -378,16 +401,30 @@ def restore_previous(name: str, shot: str) -> bool:
     return True
 
 
-async def regenerate_description(name: str, title: str, note: str | None, llm) -> dict:
+def find_cutouts(*candidates: str | None) -> str | None:
+    """The first of these names that has cutouts on disk, e.g. a variant's product name."""
+    return next((name for name in candidates if name and generate.reference_cutouts(name)), None)
+
+
+async def regenerate_description(
+    name: str,
+    title: str,
+    note: str | None,
+    llm,
+    *,
+    cutouts: str | None = None,
+    color: str | None = None,
+) -> dict:
     """Rewrite the FR and AR text from the images already on disk. No image is touched.
 
     Merged into description.json rather than replacing it, so the title and image
     list stay. Written through a temp file because the review page re-reads this
     file every few seconds.
     """
-    references = generate.reference_cutouts(name)
+    source = cutouts or name
+    references = generate.reference_cutouts(source)
     if not references:
-        raise ValueError(f"{name}: no cutouts in {generate.cutout_dir(name)} to describe from")
+        raise ValueError(f"{name}: no cutouts in {generate.cutout_dir(source)} to describe from")
     images = [
         generate.output_path(name, shot)
         for shot in ALL_SHOTS
@@ -397,7 +434,14 @@ async def regenerate_description(name: str, title: str, note: str | None, llm) -
         raise ValueError(f"{name}: no staged images in {generate.OUTPUT_DIR / name}")
 
     result = await make_write_description(llm)(
-        {"name": name, "title": title, "references": references, "generated_images": images, "note": note}
+        {
+            "name": name,
+            "title": title,
+            "references": references,
+            "generated_images": images,
+            "note": note,
+            "color": color,
+        }
     )
 
     path = description_path(name)
@@ -432,13 +476,20 @@ def plan_inputs(
         if source is None and not has_photos:
             missing.append(product.name)
             continue
+        # A colour variant keeps its own output folder (`chaise-camping-vert`) but stages
+        # from its product's shared cutouts, so the folder is never taken from them.
         state: CatalogState = {
-            "name": source or product.name,
+            "name": product.name if product.group else (source or product.name),
             "title": product.title,
             "scenery": product.scenery,
             "shots": shots,
             "force": force,
         }
+        if product.group:
+            state["cutouts"] = source or product.group
+        if product.color:
+            state["color"] = product.color
+            state["photo_color"] = product.photo_color
         if has_photos:
             state["folder"] = product.folder
         inputs.append(state)

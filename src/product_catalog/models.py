@@ -9,6 +9,7 @@ condition new).
 from __future__ import annotations
 
 import csv
+import re
 from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
@@ -25,7 +26,7 @@ from pydantic import (
     model_validator,
 )
 
-from product_catalog.naming import product_name
+from product_catalog.naming import product_name, slugify
 
 
 PHOTO_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp"})
@@ -81,6 +82,30 @@ def _strip(value: object) -> object:
 
 OptionalCell = Annotated[str | None, BeforeValidator(_blank_to_none), BeforeValidator(_strip)]
 
+MAX_COLOR = 100  # Meta's limit for a colour in the Batch API
+
+
+def _split_colors(value: object) -> object:
+    """`vert; bleu | rouge` -> ("vert", "bleu", "rouge"). Blank means no variants.
+
+    Semicolon and pipe are the separators to use, because a comma has to be
+    quoted in a CSV cell; a quoted comma list works too. Two spellings of the same
+    colour (`Vert`, `vert `, `VERT`) are one colour, since they would get one id.
+    """
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return ()
+    if isinstance(value, str):
+        parts = [part.strip() for part in re.split(r"[;|,]", value)]
+    elif isinstance(value, (list, tuple)):
+        parts = [str(part).strip() for part in value]
+    else:
+        return value
+    seen: dict[str, str] = {}
+    for part in parts:
+        if part:
+            seen.setdefault(slugify(part) or part.casefold(), part)
+    return tuple(seen.values())
+
 
 class ProductRow(BaseModel):
     """A single row of products.csv.
@@ -120,6 +145,38 @@ class ProductRow(BaseModel):
         default=None,
         description="Product page URL. None means the run fills in a flagged placeholder.",
     )
+    colors: Annotated[tuple[str, ...], BeforeValidator(_split_colors)] = Field(
+        default=(),
+        description=(
+            "Colour variants, separated by `;` or `|`, e.g. `vert; bleu; rouge`. Each "
+            "colour becomes its own listing, with its own generated photos, grouped "
+            "under one product in the Meta catalogue. Blank means a single listing."
+        ),
+    )
+    photo_color: OptionalCell = Field(
+        default=None,
+        max_length=MAX_COLOR,
+        description=(
+            "The colour the product has in its photos. That variant is staged as the "
+            "photo shows it; every other colour is recoloured from it. Blank means "
+            "every variant is recoloured."
+        ),
+    )
+    color: OptionalCell = Field(
+        default=None,
+        max_length=MAX_COLOR,
+        description=(
+            "The colour of a product that comes in just one. Sent to Meta as `color`. "
+            "For several colours use `colors` instead."
+        ),
+    )
+    # Set when `colors` is expanded into variants, never read from the CSV: the alias is
+    # something no header will be called, and `model_copy` sets it by field name.
+    group: str | None = Field(
+        default=None,
+        validation_alias="_variant_group",
+        description="The product a colour variant belongs to; Meta's `item_group_id`.",
+    )
 
     @field_validator("product_folder", mode="before")
     @classmethod
@@ -150,6 +207,61 @@ class ProductRow(BaseModel):
     @classmethod
     def _default_condition(cls, value: object) -> object:
         return Condition.NEW if _is_blank(value) else _normalize_enum(value)
+
+    @field_validator("colors")
+    @classmethod
+    def _colors_make_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        """A colour goes into the listing id, so it needs at least one latin letter or digit."""
+        for color in value:
+            if len(color) > MAX_COLOR:
+                raise ValueError(f"colour `{color[:20]}...` is over {MAX_COLOR} characters")
+            if not slugify(color):
+                raise ValueError(
+                    f"colour `{color}` has no letters or digits that can go in a product id - "
+                    "give it a latin name, e.g. `vert` instead of `أخضر`"
+                )
+        return value
+
+    @model_validator(mode="after")
+    def _colour_columns_agree(self) -> Self:
+        if self.colors and self.color:
+            raise ValueError("use `color` for a single colour or `colors` for several, not both")
+        if self.photo_color and not self.colors:
+            raise ValueError("`photo_color` only means something next to `colors`")
+        return self
+
+    def variants(self) -> list[ProductRow]:
+        """This row as the listings it makes: one per colour, or just itself.
+
+        Every variant keeps the row's price, photos, scene and text settings, gets its
+        own colour, and shares one `group` (the product's name before the colour is
+        added), which is what ties them together in the catalogue.
+        """
+        if not self.colors:
+            return [self]
+        base = product_name(self)
+        return [
+            self.model_copy(update={"color": color, "colors": (), "group": base})
+            for color in self.colors
+        ]
+
+    @property
+    def staged_from_color(self) -> str | None:
+        """The colour the product has in the photos it is staged from.
+
+        A variant says so in `photo_color`. A single-colour product's photos show its
+        own colour, so it is never recoloured.
+        """
+        return self.photo_color or (None if self.group else self.color)
+
+    @property
+    def folder_alias(self) -> str | None:
+        """The photo folder's name, which an output folder may be filed under.
+
+        Only a single listing can go by it. A variant never does, or every colour of a
+        product would claim the same folder.
+        """
+        return None if self.group else slugify(self.product_folder.name)
 
     @property
     def slug_source(self) -> str:
@@ -214,14 +326,18 @@ class ProductBatch(BaseModel):
         """
         seen: dict[str, int] = {}
         for index, row in enumerate(self.rows, start=2):  # row 1 is the header
-            name = product_name(row)
-            if name in seen:
-                raise ValueError(
-                    f"rows {seen[name]} and {index} both become the product id "
-                    f"`{name}` - give each product a distinct title"
-                )
-            seen[name] = index
+            for name in (product_name(variant) for variant in row.variants()):
+                if name in seen:
+                    raise ValueError(
+                        f"rows {seen[name]} and {index} both become the product id "
+                        f"`{name}` - give each product a distinct title"
+                    )
+                seen[name] = index
         return self
+
+    def listings(self) -> list[ProductRow]:
+        """Every listing the batch makes, in file order: colour variants expanded."""
+        return [variant for row in self.rows for variant in row.variants()]
 
     def missing_photos(self) -> list[ProductRow]:
         """Rows with nothing to segment — folder absent, or holding no photos.

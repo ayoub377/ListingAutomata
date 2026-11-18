@@ -39,6 +39,12 @@ class Listing(BaseModel, ABC):
     image_urls: list[str] = Field(
         min_length=1, description="Hosted photo URLs, main shot first."
     )
+    color: str | None = Field(default=None, max_length=100)
+    item_group_id: str | None = Field(
+        default=None,
+        max_length=100,
+        description="Ties the colour variants of one product together; same value on each.",
+    )
 
     @classmethod
     def from_row(cls, row: ProductRow, **fields: object) -> Self:
@@ -58,9 +64,12 @@ class Listing(BaseModel, ABC):
                 "availability",
                 "condition",
                 "link",
+                "color",
             },
             exclude_none=True,
         )
+        if row.group:
+            from_row["item_group_id"] = row.group
         return cls.model_validate({**from_row, **fields})
 
     @abstractmethod
@@ -90,6 +99,8 @@ class MetaListing(Listing):
         "additional_image_link",
         "brand",
         "google_product_category",
+        "item_group_id",
+        "color",
     )
     max_title: ClassVar[int] = 200
     max_description: ClassVar[int] = 9999
@@ -99,6 +110,17 @@ class MetaListing(Listing):
     google_product_category: str | None = Field(
         default=None, description="Google taxonomy id or path, e.g. `Home & Garden`."
     )
+
+    @model_validator(mode="after")
+    def _a_variant_has_its_variant_fields(self) -> Self:
+        """Meta: every item in a group must fill in the variant fields the group uses.
+
+        A grouped item with no colour is the "parent row" Meta's own guide calls the
+        wrong way to set variants up.
+        """
+        if self.item_group_id and not self.color:
+            raise ValueError("a listing in a variant group needs its colour")
+        return self
 
     @model_validator(mode="after")
     def _within_meta_limits(self) -> Self:
@@ -131,6 +153,8 @@ class MetaListing(Listing):
             "additional_image_link": ",".join(others),
             "brand": self.brand or "",
             "google_product_category": self.google_product_category or "",
+            "item_group_id": self.item_group_id or "",
+            "color": self.color or "",
         }
         return {column: row[column] for column in self.feed_columns}
 
@@ -159,6 +183,10 @@ class MetaListing(Listing):
             data["brand"] = self.brand
         if self.google_product_category:
             data["google_product_category"] = self.google_product_category
+        if self.item_group_id:
+            data["item_group_id"] = self.item_group_id
+        if self.color:
+            data["color"] = self.color
         return {"method": "UPDATE", "data": data}
 
     @classmethod

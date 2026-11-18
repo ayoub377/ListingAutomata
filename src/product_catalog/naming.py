@@ -22,5 +22,11 @@ def slugify(value: str) -> str:
 
 
 def product_name(row: ProductRow) -> str:
-    """Output folder name for a row: its title, else its photo folder's name."""
+    """Output folder name for a row: its title, else its photo folder's name.
+
+    A colour variant adds its colour to the product's name, so `chaise-camping`
+    becomes `chaise-camping-vert`. Every other row keeps the name it always had.
+    """
+    if row.group and row.color:
+        return f"{row.group}-{slugify(row.color)}"
     return slugify(row.title) if row.title else slugify(row.product_folder.name)

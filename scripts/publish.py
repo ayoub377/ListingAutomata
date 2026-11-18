@@ -197,7 +197,9 @@ def make_build_listing(whatsapp_number: str | None):
 
     async def build_listing(state: PublishState) -> PublishState:
         row = state["row"]
-        link = row.link or whatsapp_link(whatsapp_number, state["title"], state["lang"])
+        # A buyer on the green listing should be asking about the green one.
+        label = f"{state['title']} ({row.color})" if row.color else state["title"]
+        link = row.link or whatsapp_link(whatsapp_number, label, state["lang"])
         listing = MetaListing.from_row(
             row,
             id=state["name"],
@@ -257,10 +259,14 @@ def plan_inputs(
     missing: list[str] = []
     for row in rows:
         name = product_name(row)
-        alias = slugify(row.product_folder.name)
-        if only and not {name, alias} & set(only):
+        alias = row.folder_alias  # None for a colour variant: its folder is its own
+        # --name chaise-camping publishes every colour of it; --name chaise-camping-vert, one.
+        known_as = {name, row.group, slugify(row.product_folder.name)} - {None}
+        if only and not known_as & set(only):
             continue
-        folder_name = next((c for c in (name, alias) if description_path(c).is_file()), None)
+        folder_name = next(
+            (c for c in (name, alias) if c and description_path(c).is_file()), None
+        )
         if folder_name is None:
             missing.append(name)
             continue
@@ -379,7 +385,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--concurrency must be at least 1")
 
     try:
-        rows = load_products_csv(args.csv).rows
+        rows = load_products_csv(args.csv).listings()
     except (OSError, ValueError) as error:
         print(error, file=sys.stderr)
         return 1

@@ -66,6 +66,10 @@ class ReviewProduct:
         return [lang for lang in LANGS if self.generated.get(lang)]
 
     @property
+    def color(self) -> str | None:
+        return self.row.color
+
+    @property
     def base_title(self) -> str:
         """The title before any edit. Same precedence as scripts/publish.py."""
         return self.row.title or self.generated.get("title") or self.name.replace("-", " ")
@@ -133,7 +137,7 @@ def _image_names(folder: Path, generated: dict) -> tuple[str, ...]:
 def discover(settings: ReviewSettings) -> Discovery:
     """Every CSV row that has generated output, plus anything worth telling the reviewer."""
     try:
-        rows = load_products_csv(settings.csv_path).rows
+        rows = load_products_csv(settings.csv_path).listings()
     except (OSError, ValueError) as error:
         return Discovery([], [str(error)])
 
@@ -142,9 +146,13 @@ def discover(settings: ReviewSettings) -> Discovery:
     claimed: set[str] = set()
     for row in rows:
         name = product_name(row)
-        alias = slugify(row.product_folder.name)
+        alias = row.folder_alias  # None for a colour variant: its folder is its own
         folder_name = next(
-            (c for c in (name, alias) if (settings.output_dir / c / DESCRIPTION_FILE).is_file()),
+            (
+                c
+                for c in (name, alias)
+                if c and (settings.output_dir / c / DESCRIPTION_FILE).is_file()
+            ),
             None,
         )
         if folder_name is None:

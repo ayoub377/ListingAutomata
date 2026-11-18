@@ -138,8 +138,9 @@ class MetaPusher:
                     "images": images,
                 }
             )
+            label = f"{product.title} ({product.row.color})" if product.row.color else product.title
             link = product.row.link or publish.whatsapp_link(
-                config.whatsapp_number, product.title, product.lang
+                config.whatsapp_number, label, product.lang
             )
             listing = build_listing(product, hosted["image_urls"], link)
 

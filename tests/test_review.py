@@ -897,3 +897,92 @@ def test_the_board_polls_faster_while_something_regenerates(
             gate.set()
         settle(client)
         assert "every 6s" in client.get("/board").text
+
+
+# --------------------------------------------------------------------------
+# Colour variants
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def variant_project(tmp_path: Path) -> ReviewSettings:
+    """One CSV row with two colours; only its variants have output, filed under their own names."""
+    (tmp_path / "products.csv").write_text(
+        "product_folder,title,price,colors,photo_color\n"
+        f'{tmp_path / "photos" / "chaise"},Chaise Camping,90,"vert; bleu",vert\n',
+        encoding="utf-8",
+    )
+    _generate(tmp_path / "output", "chaise-camping-vert")
+    _generate(tmp_path / "output", "chaise-camping-bleu")
+    return ReviewSettings.from_project(tmp_path)
+
+
+def test_each_colour_is_its_own_card_with_a_colour_chip(variant_project: ReviewSettings, pusher: FakePusher) -> None:
+    found = discover(variant_project).products
+
+    assert [(p.name, p.folder_name, p.color) for p in found] == [
+        ("chaise-camping-vert", "chaise-camping-vert", "vert"),
+        ("chaise-camping-bleu", "chaise-camping-bleu", "bleu"),
+    ]
+    page = TestClient(create_app(variant_project, pusher), headers=HTMX).get("/").text
+    assert page.count('<span class="chip">') == 2
+    assert page.count("variant of chaise-camping") == 2
+
+
+def test_a_variant_ignores_output_left_under_the_photo_folders_name(
+    variant_project: ReviewSettings,
+) -> None:
+    _generate(variant_project.output_dir, "chaise")  # an old single-listing run
+
+    found = discover(variant_project)
+
+    assert [p.name for p in found.products] == ["chaise-camping-vert", "chaise-camping-bleu"]
+    assert any("output/chaise " in problem for problem in found.problems)
+
+
+def test_approving_one_colour_leaves_the_others_pending(variant_project: ReviewSettings, pusher: FakePusher) -> None:
+    client = TestClient(create_app(variant_project, pusher), headers=HTMX)
+    folder = variant_project.output_dir / "chaise-camping-bleu"
+
+    client.post("/products/chaise-camping-bleu/approve", data={"fp": fingerprint(folder)})
+
+    assert load_review(folder).status is Status.APPROVED
+    assert load_review(variant_project.output_dir / "chaise-camping-vert").status is Status.PENDING
+
+
+def test_pushing_a_variant_sends_its_group_and_colour(variant_project: ReviewSettings) -> None:
+    bleu = discover(variant_project).products[1]
+
+    data = build_listing(bleu, ["https://cdn/a.jpg"], "https://wa.me/1").to_batch_request()["data"]
+
+    assert (data["id"], data["item_group_id"], data["color"]) == ("chaise-camping-bleu", "chaise-camping", "bleu")
+
+
+def test_the_real_regenerator_stages_a_colour_from_the_shared_cutouts(
+    variant_project: ReviewSettings, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from PIL import Image
+
+    from product_catalog.review.regenerator import WorkflowRegenerator
+
+    regenerator = WorkflowRegenerator()
+    workflow = regenerator._module()
+    monkeypatch.setattr(workflow.generate, "IMAGES_DIR", tmp_path / "images")
+    cutout = tmp_path / "images" / "chaise-camping" / "product_1_seg.png"
+    cutout.parent.mkdir(parents=True)
+    Image.new("RGBA", (10, 10), (0, 128, 0, 255)).save(cutout)
+    monkeypatch.setattr(workflow.generate, "load_keys", lambda: ("key", None))
+    captured: dict = {}
+
+    async def fake_regenerate_shot(state, api_key, log=None):
+        captured.update(state)
+
+    monkeypatch.setattr(workflow, "regenerate_shot", fake_regenerate_shot)
+    bleu = discover(variant_project).products[1]
+
+    asyncio.run(regenerator.image(bleu, "angle", "note", "a forest"))
+
+    assert captured["name"] == "chaise-camping-bleu"  # its own output folder
+    assert captured["cutouts"] == "chaise-camping"  # the product's shared cutouts
+    assert (captured["color"], captured["photo_color"]) == ("bleu", "vert")
+    assert captured["shots"] == ["angle"]

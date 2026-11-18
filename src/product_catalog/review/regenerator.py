@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 from typing import Any, Protocol
 
+from product_catalog.naming import slugify
 from product_catalog.review.catalog import ReviewProduct
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[3] / "scripts"
@@ -46,6 +47,13 @@ class WorkflowRegenerator:
             self._workflow = workflow
         return self._workflow
 
+    def _cutouts(self, product: ReviewProduct) -> str | None:
+        """Where this product's cutouts are: its own name, its product's, or its photo folder's."""
+        row = product.row
+        return self._module().find_cutouts(
+            product.folder_name, row.group, slugify(row.product_folder.name)
+        ) or row.group
+
     def missing(self) -> list[str]:
         key = self._module().generate.load_keys()[0]
         return [] if key else ["OPEN_ROUTER_API_KEY"]
@@ -55,14 +63,19 @@ class WorkflowRegenerator:
         key = workflow.generate.load_keys()[0]
         if not key:
             raise ValueError("OPEN_ROUTER_API_KEY is not set in .env")
+        row = product.row
         await workflow.regenerate_shot(
             {
                 "name": product.folder_name,
                 "title": product.title,
                 "scenery": scenery or None,
-                "folder": product.row.product_folder,
+                "folder": row.product_folder,
                 "shots": [shot],
                 "note": note or None,
+                # A colour is recoloured from the product's shared cutouts, never its own.
+                "cutouts": self._cutouts(product),
+                "color": row.color,
+                "photo_color": row.staged_from_color,
             },
             key,
         )
@@ -75,7 +88,14 @@ class WorkflowRegenerator:
         from langchain_openrouter import ChatOpenRouter
 
         llm = ChatOpenRouter(model=workflow.DESCRIPTION_MODEL, api_key=key, temperature=0.3)
-        await workflow.regenerate_description(product.folder_name, product.title, note or None, llm)
+        await workflow.regenerate_description(
+            product.folder_name,
+            product.title,
+            note or None,
+            llm,
+            cutouts=self._cutouts(product),
+            color=product.row.color,
+        )
 
     def restore(self, product: ReviewProduct, shot: str) -> bool:
         return self._module().restore_previous(product.folder_name, shot)

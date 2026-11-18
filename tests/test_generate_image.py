@@ -394,3 +394,105 @@ def test_read_manifest_is_empty_for_a_product_never_hosted(tmp_path: Path, monke
     monkeypatch.setattr(generate_script, "OUTPUT_DIR", tmp_path / "output")
 
     assert generate_script.read_manifest("chaise") == {"product": "chaise", "images": []}
+
+
+# --------------------------------------------------------------------------
+# Colour variants
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("color", "photo_color", "expected"),
+    [
+        ("bleu", "vert", "bleu"),
+        ("bleu", None, "bleu"),  # no photo colour given: every variant is recoloured
+        ("Vert", "vert ", None),  # the same colour spelled differently
+        ("vert", "vert", None),
+        (None, "vert", None),
+        (None, None, None),
+    ],
+)
+def test_recolor_target_skips_the_colour_the_photo_already_shows(
+    color: str | None, photo_color: str | None, expected: str | None
+) -> None:
+    assert generate_script.recolor_target(color, photo_color) == expected
+
+
+def test_the_recolour_clause_appears_only_for_a_colour_that_needs_it() -> None:
+    plain = generate_script.build_prompt("Chaise", "a forest", "Angle.")
+    recoloured = generate_script.build_prompt("Chaise", "a forest", "Angle.", color="bleu")
+
+    assert "version of the product" not in plain
+    assert "this is the bleu version of the product" in recoloured
+    assert "Change only the colour of the product's main fabric, body or shell to bleu" in recoloured
+    # The exception has to sit right after the fidelity rule it exempts, not far from it.
+    fidelity = recoloured.index(generate_script.FIDELITY)
+    exception = recoloured.index("Exception to the rule above")
+    assert fidelity < exception < recoloured.index(generate_script.PACKAGING)
+
+
+def _variant_csv(tmp_path: Path, extra_header: str = "", extra_cells: str = "") -> Path:
+    folder = tmp_path / "chaise"
+    folder.mkdir()
+    (folder / "chaise_kass1.jpeg").touch()
+    csv_path = tmp_path / "products.csv"
+    csv_path.write_text(
+        f"product_folder,title,price,scenery,colors{extra_header}\n"
+        f'{folder},Chaise Camping,90,a forest,"vert; bleu"{extra_cells}\n',
+        encoding="utf-8",
+    )
+    return csv_path
+
+
+def test_products_from_csv_makes_one_product_per_colour(tmp_path: Path) -> None:
+    products = generate_script.products_from_csv(_variant_csv(tmp_path, ",photo_color", ",vert"))
+
+    assert [p.name for p in products] == ["chaise-camping-vert", "chaise-camping-bleu"]
+    assert all(p.group == "chaise-camping" and p.title == "Chaise Camping" for p in products)
+    assert all(p.scenery == "a forest" for p in products)
+    # --name chaise-camping or --name chaise finds the colours; they all share one set of cutouts.
+    assert all(p.answers_to("chaise-camping") and p.answers_to("chaise") for p in products)
+    assert [p.recolor for p in products] == [None, "bleu"]  # the photo is green, so green is not recoloured
+
+
+def test_every_colour_is_recoloured_when_the_csv_does_not_say_what_the_photo_shows(tmp_path: Path) -> None:
+    products = generate_script.products_from_csv(_variant_csv(tmp_path))
+
+    assert [p.recolor for p in products] == ["vert", "bleu"]
+
+
+def test_a_variant_without_a_title_is_called_by_its_product_not_its_colour_id(tmp_path: Path) -> None:
+    folder = tmp_path / "tente-2p"
+    folder.mkdir()
+    csv_path = tmp_path / "products.csv"
+    csv_path.write_text(f'product_folder,price,colors\n{folder},500,"vert; bleu"\n', encoding="utf-8")
+
+    titles = {p.title for p in generate_script.products_from_csv(csv_path)}
+
+    assert titles == {"tente 2p"}
+
+
+def test_plan_generations_recolours_only_the_variants_that_need_it(tmp_path: Path) -> None:
+    products = generate_script.products_from_csv(_variant_csv(tmp_path, ",photo_color", ",vert"))
+
+    jobs = generate_script.plan_generations(products)
+
+    by_name: dict[str, list[str]] = {}
+    for job in jobs:
+        by_name.setdefault(job.name, []).append(job.prompt)
+    assert set(by_name) == {"chaise-camping-vert", "chaise-camping-bleu"}
+    assert all("version of the product" not in prompt for prompt in by_name["chaise-camping-vert"])
+    assert all("this is the bleu version" in prompt for prompt in by_name["chaise-camping-bleu"])
+    assert len(jobs) == 4  # two colours, two shots each
+
+
+def test_a_single_colour_product_is_never_recoloured(tmp_path: Path) -> None:
+    folder = tmp_path / "chaise"
+    folder.mkdir()
+    csv_path = tmp_path / "products.csv"
+    csv_path.write_text(f"product_folder,title,price,color\n{folder},Chaise Camping,90,vert\n", encoding="utf-8")
+
+    product = generate_script.products_from_csv(csv_path)[0]
+
+    assert (product.color, product.photo_color, product.recolor) == ("vert", "vert", None)
+    assert product.name == "chaise-camping"

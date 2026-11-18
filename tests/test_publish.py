@@ -368,3 +368,69 @@ def test_main_stops_without_meta_credentials(folders: Path, monkeypatch, capsys)
 
     assert publish.main(["--csv", str(csv_path)]) == 1
     assert "META_CATALOG_ID, META_ACCESS_TOKEN not set" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------
+# Colour variants
+# --------------------------------------------------------------------------
+
+
+def test_a_variant_never_claims_its_products_folder_or_the_photo_folders_name(folders: Path) -> None:
+    """An old single-listing run left output/chaise behind; no colour may pick it up."""
+    _generated("chaise")
+    _generated("chaise-camping-vert")
+    variants = _row(folders, colors="vert; bleu").variants()
+
+    inputs, missing = publish.plan_inputs(variants, "fr", False)
+
+    assert [(i["name"], i["folder_name"]) for i in inputs] == [("chaise-camping-vert", "chaise-camping-vert")]
+    assert missing == ["chaise-camping-bleu"]
+
+
+def test_naming_a_product_publishes_every_colour_and_naming_a_colour_publishes_one(folders: Path) -> None:
+    _generated("chaise-camping-vert")
+    _generated("chaise-camping-bleu")
+    variants = _row(folders, colors="vert; bleu").variants()
+
+    everything, _ = publish.plan_inputs(variants, "fr", False, only=["chaise-camping"])
+    one, _ = publish.plan_inputs(variants, "fr", False, only=["chaise-camping-bleu"])
+    by_folder, _ = publish.plan_inputs(variants, "fr", False, only=["chaise"])
+
+    assert [i["name"] for i in everything] == ["chaise-camping-vert", "chaise-camping-bleu"]
+    assert [i["name"] for i in one] == ["chaise-camping-bleu"]
+    assert [i["name"] for i in by_folder] == ["chaise-camping-vert", "chaise-camping-bleu"]
+
+
+def test_a_variants_listing_carries_group_and_colour_and_its_whatsapp_link_names_the_colour(
+    folders: Path,
+) -> None:
+    variant = _row(folders, colors="vert; bleu").variants()[1]
+    state = {
+        "name": "chaise-camping-bleu",
+        "row": variant,
+        "lang": "fr",
+        "title": "Chaise Camping",
+        "description": "Chaise pliante.",
+        "image_urls": ["https://img.example.com/1.jpg"],
+    }
+
+    listing = asyncio.run(publish.make_build_listing("0612345678")(state))["listing"]
+
+    assert (listing.id, listing.item_group_id, listing.color) == ("chaise-camping-bleu", "chaise-camping", "bleu")
+    assert "%28bleu%29" in listing.link  # "(bleu)": the buyer asks about the colour they were looking at
+
+
+def test_a_single_listings_whatsapp_link_is_unchanged(folders: Path) -> None:
+    state = {
+        "name": "chaise-camping",
+        "row": _row(folders),
+        "lang": "fr",
+        "title": "Chaise Camping",
+        "description": "Chaise pliante.",
+        "image_urls": ["https://img.example.com/1.jpg"],
+    }
+
+    listing = asyncio.run(publish.make_build_listing("0612345678")(state))["listing"]
+
+    assert listing.link.endswith(publish.quote("Bonjour, je suis intéressé par : Chaise Camping"))
+    assert listing.item_group_id is None and listing.color is None

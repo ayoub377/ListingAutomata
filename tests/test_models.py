@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from product_catalog import ProductRow, is_primary_photo, load_products_csv
+from product_catalog import ProductRow, is_primary_photo, load_products_csv, product_name
 
 
 def _write_csv(tmp_path: Path, body: str) -> Path:
@@ -167,3 +167,116 @@ def test_a_blank_folder_cell_names_the_column(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="product_folder is empty"):
         load_products_csv(csv_path)
+
+
+# --------------------------------------------------------------------------
+# Colour variants
+# --------------------------------------------------------------------------
+
+
+def _chair(tmp_path: Path, **fields: object) -> ProductRow:
+    values = {"product_folder": tmp_path / "chaise", "title": "Chaise Camping", "price": 90}
+    return ProductRow(**{**values, **fields})
+
+
+def test_colors_expand_into_one_listing_each_sharing_a_group(tmp_path: Path) -> None:
+    variants = _chair(tmp_path, colors="vert; Bleu | rouge").variants()
+
+    assert [variant.color for variant in variants] == ["vert", "Bleu", "rouge"]
+    assert [product_name(variant) for variant in variants] == [
+        "chaise-camping-vert",
+        "chaise-camping-bleu",
+        "chaise-camping-rouge",
+    ]
+    assert {variant.group for variant in variants} == {"chaise-camping"}
+    assert all(variant.price == 90 and variant.colors == () for variant in variants)
+
+
+def test_a_row_without_colors_is_one_listing_and_keeps_its_id(tmp_path: Path) -> None:
+    row = _chair(tmp_path)
+
+    assert row.variants() == [row]
+    assert product_name(row) == "chaise-camping"
+    assert row.group is None
+
+
+def test_a_blank_colors_cell_means_no_variants(tmp_path: Path) -> None:
+    assert _chair(tmp_path, colors="   ").colors == ()
+    assert _chair(tmp_path, colors=None).colors == ()
+
+
+def test_colors_take_a_quoted_comma_list_and_drop_duplicates_and_blanks(tmp_path: Path) -> None:
+    """`Vert` and `vert ` would both become `chaise-camping-vert`, so they are one colour."""
+    assert _chair(tmp_path, colors="vert, bleu, Vert ,,  ").colors == ("vert", "bleu")
+
+
+@pytest.mark.parametrize(
+    ("fields", "message"),
+    [
+        ({"colors": "vert", "color": "bleu"}, "not both"),
+        ({"photo_color": "vert"}, "only means something next to `colors`"),
+        ({"colors": "أخضر"}, "no letters or digits"),
+        ({"colors": "x" * 101}, "over 100"),
+        ({"group": "chaise"}, "Extra inputs are not permitted"),  # set by expansion, never by a CSV column
+    ],
+)
+def test_bad_colour_cells_are_refused(tmp_path: Path, fields: dict, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        _chair(tmp_path, **fields)
+
+
+def test_a_variant_of_an_untitled_row_is_named_after_its_folder(tmp_path: Path) -> None:
+    row = ProductRow(product_folder=tmp_path / "Tente 2P", price=500, colors="vert")
+
+    assert [product_name(variant) for variant in row.variants()] == ["tente-2p-vert"]
+
+
+def test_a_single_colour_product_keeps_its_id_and_gets_no_group(tmp_path: Path) -> None:
+    row = _chair(tmp_path, color="vert")
+
+    assert (row.color, row.group, product_name(row)) == ("vert", None, "chaise-camping")
+
+
+def test_only_a_single_listing_can_go_by_its_photo_folders_name(tmp_path: Path) -> None:
+    """Otherwise every colour of a product would claim the same output folder."""
+    assert _chair(tmp_path).folder_alias == "chaise"
+    assert {variant.folder_alias for variant in _chair(tmp_path, colors="vert; bleu").variants()} == {None}
+
+
+def test_the_photo_colour_is_the_one_the_csv_names_or_the_single_colour(tmp_path: Path) -> None:
+    assert _chair(tmp_path, colors="vert; bleu", photo_color="vert").variants()[1].staged_from_color == "vert"
+    assert _chair(tmp_path, colors="vert; bleu").variants()[0].staged_from_color is None  # recolour all
+    assert _chair(tmp_path, color="vert").staged_from_color == "vert"  # its photo already shows it
+    assert _chair(tmp_path).staged_from_color is None
+
+
+def test_a_csv_with_a_colors_column_loads_and_flattens_in_file_order(tmp_path: Path) -> None:
+    path = _write_csv(
+        tmp_path,
+        "product_folder,title,price,colors,photo_color\n"
+        f"{tmp_path / 'chaise'},Chaise Camping,90,vert; bleu,vert\n"
+        f"{tmp_path / 'table'},Table Pliante,250,,\n",
+    )
+
+    batch = load_products_csv(path)
+
+    assert len(batch.rows) == 2  # the folders are still listed once each
+    assert [product_name(listing) for listing in batch.listings()] == [
+        "chaise-camping-vert",
+        "chaise-camping-bleu",
+        "table-pliante",
+    ]
+    assert batch.listings()[0].photo_color == "vert"
+
+
+def test_a_variant_that_collides_with_another_product_is_reported_with_its_row(tmp_path: Path) -> None:
+    """`Tente` in `vert` is `tente-vert`, which a product titled `Tente Vert` already is."""
+    path = _write_csv(
+        tmp_path,
+        "product_folder,title,price,colors\n"
+        f"{tmp_path / 'a'},Tente,500,vert; bleu\n"
+        f"{tmp_path / 'b'},Tente Vert,300,\n",
+    )
+
+    with pytest.raises(ValueError, match=r"rows 2 and 3 both become the product id `tente-vert`"):
+        load_products_csv(path)
