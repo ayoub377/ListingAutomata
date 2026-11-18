@@ -1,0 +1,176 @@
+<section id="board"
+         hx-get="/board"
+         hx-trigger="every {{ poll }}s [!document.querySelector('.editing, .htmx-request')]"
+         hx-swap="outerHTML"
+         hx-vals='{"view": "{{ view }}"}'>
+
+  <div class="toolbar">
+    <nav class="tabs">
+      {% for key in views %}
+      <button class="tab {{ 'on' if view == key }}" hx-get="/board" hx-target="#board" hx-swap="outerHTML"
+              hx-vals='{"view": "{{ key }}"}'>{{ key|capitalize }}<span class="n">{{ counts[key] }}</span></button>
+      {% endfor %}
+    </nav>
+    <button class="primary" hx-post="/push-approved" hx-target="#board" hx-swap="outerHTML" hx-disabled-elt="this"
+            hx-confirm="Push {{ counts['approved'] }} approved product(s) to the Meta catalogue?"
+            {% if not counts['approved'] or missing %}disabled{% endif %}>Push {{ counts['approved'] }} approved to Meta</button>
+  </div>
+
+  {% if missing %}
+  <div class="banner warn">Pushing is off: set {{ missing|join(', ') }} in .env, then restart the app.</div>
+  {% endif %}
+  {% if can_regenerate and regen_missing %}
+  <div class="banner warn">Regenerating is off: set {{ regen_missing|join(', ') }} in .env, then restart the app.</div>
+  {% endif %}
+  {% for problem in problems %}
+  <div class="banner warn">{{ problem }}</div>
+  {% endfor %}
+  {% if summary %}
+  <div class="banner info">{{ summary }}</div>
+  {% endif %}
+
+  <div class="grid">
+    {% for p in products %}
+    {% set is_editing = editing == p.name %}
+    {% set is_fixing = fixing == p.name %}
+    {% set job = jobs.get(p.name) %}
+    {% set busy = job and job.state == 'running' %}
+    <article class="card {{ p.status.value }}{{ ' editing' if is_editing or is_fixing }}" id="card-{{ p.name }}">
+      <div class="shots">
+        {% for file in p.images %}
+        <img loading="lazy" class="zoom" tabindex="0" role="button"
+             src="/media/{{ p.name }}/{{ file|urlencode }}?v={{ p.fingerprint[:8] }}"
+             data-full="/media/{{ p.name }}/{{ file|urlencode }}?v={{ p.fingerprint[:8] }}"
+             data-group="{{ p.name }}" data-caption="{{ p.title }} - {{ p.shot_of(file) }} photo"
+             alt="{{ p.title }}, {{ p.shot_of(file) }} photo. Click to enlarge.">
+        {% endfor %}
+        {% if busy %}<div class="working">Regenerating {{ 'the description' if job.part == 'description' else 'the ' ~ job.part ~ ' photo' }}&hellip;</div>{% endif %}
+      </div>
+
+      <div class="body">
+        {% if is_editing %}
+        <form class="edit" hx-post="/products/{{ p.name }}/save" hx-target="#board" hx-swap="outerHTML">
+          <label>Title
+            <input id="edit-title" name="title" value="{{ form.title }}" maxlength="200" required>
+            {% if errors.title %}<span class="err">{{ errors.title }}</span>{% endif %}
+          </label>
+          <label>Price ({{ p.row.currency }})
+            <input id="edit-price" name="price" value="{{ form.price }}" inputmode="decimal" required>
+            {% if errors.price %}<span class="err">{{ errors.price }}</span>{% endif %}
+          </label>
+          <label>Language
+            <select name="lang" hx-get="/products/{{ p.name }}/edit" hx-trigger="change" hx-include="#edit-title, #edit-price"
+                    hx-target="#board" hx-swap="outerHTML">
+              {% for code in p.langs %}
+              <option value="{{ code }}" {{ 'selected' if code == form.lang }}>{{ code|upper }}</option>
+              {% endfor %}
+            </select>
+            {% if errors.lang %}<span class="err">{{ errors.lang }}</span>{% endif %}
+          </label>
+          <label>Description
+            <textarea name="description" rows="9" maxlength="9999" dir="auto" required>{{ form.description }}</textarea>
+            {% if errors.description %}<span class="err">{{ errors.description }}</span>{% endif %}
+          </label>
+          <p class="note">Switching language loads that language's generated text. Saving sends the product back to pending.</p>
+          <div class="actions">
+            <button class="primary" type="submit">Save</button>
+            <button type="button" hx-get="/board" hx-target="#board" hx-swap="outerHTML">Cancel</button>
+          </div>
+        </form>
+
+        {% elif is_fixing %}
+        <div class="head">
+          <h2>Fix and regenerate</h2>
+          <span class="badge {{ p.status.value }}">{{ p.status.value }}</span>
+        </div>
+        <p class="note">Tick what is wrong, add detail if you like, and regenerate that part only. Nothing else changes.
+          A photo costs about $0.04 and takes up to a minute. The product goes back to pending afterwards.</p>
+        {% if notes.get(p.name) %}<p class="err">{{ notes[p.name] }}</p>{% endif %}
+
+        {% for file in p.images %}
+        {% set shot = p.shot_of(file) %}
+        <form class="part" hx-post="/products/{{ p.name }}/regenerate/{{ shot }}" hx-target="#board" hx-swap="outerHTML"
+              hx-disabled-elt="find button[type=submit]">
+          <strong>{{ shot|capitalize }} photo</strong>
+          {% for key, item in image_problems.items() %}
+          <label class="check"><input type="checkbox" name="ticked" value="{{ key }}"> {{ item[0] }}</label>
+          {% endfor %}
+          <label>Anything else to fix
+            <textarea name="note" rows="2" maxlength="1000" placeholder="e.g. the cup holder on the left arm is missing"></textarea>
+          </label>
+          <label>Setting
+            <input name="scenery" value="{{ p.scenery }}" maxlength="500" placeholder="Empty means a plain white backdrop">
+          </label>
+          <div class="actions">
+            <button class="primary" type="submit" {% if busy or regen_missing %}disabled{% endif %}>Regenerate {{ shot }} photo</button>
+            {% if p.has_previous(file) %}
+            <button type="button" hx-post="/products/{{ p.name }}/restore/{{ shot }}" hx-target="#board" hx-swap="outerHTML"
+                    {% if busy %}disabled{% endif %}>Bring back the earlier one</button>
+            {% endif %}
+          </div>
+        </form>
+        {% endfor %}
+
+        <form class="part" hx-post="/products/{{ p.name }}/regenerate/description" hx-target="#board" hx-swap="outerHTML"
+              hx-disabled-elt="find button[type=submit]">
+          <strong>Description</strong>
+          {% for key, item in description_problems.items() %}
+          <label class="check"><input type="checkbox" name="ticked" value="{{ key }}"> {{ item[0] }}</label>
+          {% endfor %}
+          <label>Anything else to fix
+            <textarea name="note" rows="2" maxlength="1000" placeholder="e.g. mention that it folds flat"></textarea>
+          </label>
+          {% if p.review.description %}<p class="note">You edited the {{ p.lang|upper }} text. Regenerating replaces your edit.</p>{% endif %}
+          <div class="actions">
+            <button class="primary" type="submit" {% if busy or regen_missing %}disabled{% endif %}>Regenerate description</button>
+          </div>
+        </form>
+        <div class="actions">
+          <button type="button" hx-get="/board" hx-target="#board" hx-swap="outerHTML">Done</button>
+        </div>
+
+        {% else %}
+        <div class="head">
+          <h2>{{ p.title }}</h2>
+          <span class="badge {{ p.status.value }}">{{ p.status.value }}</span>
+        </div>
+        <p class="price">{{ '%.2f'|format(p.price) }} {{ p.row.currency }}</p>
+        <p class="desc" dir="auto">{{ p.description }}</p>
+        <span class="lang">{{ p.lang|upper }}</span>
+        {% if job and job.state == 'failed' %}
+        <p class="err">Regenerating the {{ 'description' if job.part == 'description' else job.part ~ ' photo' }} failed: {{ job.message }}</p>
+        <button hx-post="/products/{{ p.name }}/dismiss" hx-target="#board" hx-swap="outerHTML">Dismiss</button>
+        {% endif %}
+        {% if p.review.error %}<p class="err">Last push failed: {{ p.review.error }}</p>{% endif %}
+        {% if notes.get(p.name) %}<p class="note">{{ notes[p.name] }}</p>{% endif %}
+        {% if p.review.pushed_at and p.status.value == 'pushed' %}<p class="note">Pushed {{ p.review.pushed_at }}</p>{% endif %}
+
+        <div class="actions" hx-target="#board" hx-swap="outerHTML">
+          {% if p.status.value in ('pending', 'rejected') %}
+          <button class="ok" hx-post="/products/{{ p.name }}/approve" hx-vals='{"fp": "{{ p.fingerprint }}"}' {% if busy %}disabled{% endif %}>Approve</button>
+          {% endif %}
+          {% if p.status.value in ('pending', 'approved') %}
+          <button class="danger" hx-post="/products/{{ p.name }}/reject" {% if busy %}disabled{% endif %}>Reject</button>
+          {% endif %}
+          {% if p.status.value == 'approved' %}
+          <button class="primary" hx-post="/products/{{ p.name }}/push" hx-disabled-elt="this"
+                  hx-confirm="Push “{{ p.title }}” to the Meta catalogue?" {% if missing or busy %}disabled{% endif %}>Push to Meta</button>
+          {% endif %}
+          {% if p.status.value != 'pending' %}
+          <button hx-post="/products/{{ p.name }}/reopen" {% if busy %}disabled{% endif %}>{{ 'Undo approval' if p.status.value == 'approved' else 'Back to pending' }}</button>
+          {% endif %}
+          <button hx-get="/products/{{ p.name }}/edit" {% if busy %}disabled{% endif %}>Edit</button>
+          {% if can_regenerate %}
+          <button hx-get="/products/{{ p.name }}/fix" {% if busy %}disabled{% endif %}>Fix and regenerate</button>
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+    </article>
+    {% else %}
+    <p class="empty">
+      {% if counts['all'] %}Nothing {{ view }}.{% else %}Nothing generated yet. Products appear here as soon as scripts/workflow.py finishes them.{% endif %}
+    </p>
+    {% endfor %}
+  </div>
+</section>

@@ -87,42 +87,72 @@ PIXELVAULT_MAX_BYTES = 5 * 1024 * 1024
 
 QUALITY = (
     "Ultra-realistic, visually stunning commercial product photograph. "
-    "Sharp focus on the product, natural light, believable shadows where it "
-    "meets the ground, rich colour, shallow depth of field."
+    "Sharp focus across the entire product, natural light, believable shadows "
+    "where it meets the ground, rich colour."
 )
 FIDELITY = (
     "The product must match the reference images exactly - same shape, "
     "proportions, colour, materials, texture and markings. Do not redesign it, "
     "do not add or remove any part of it, do not invent a logo."
 )
-# The first run put a man with a cropped face in the frame, because the context
-# shot used to ask for the product "in use". People are not banned - a scenery
-# cell can ask for them, as the Bestway row's does - but they have to be whole.
-FRAMING = (
-    "Show the entire product, nothing cropped at the edges. Any person in the "
-    "scene must be fully and naturally framed, never cut through the face or body."
+# The 3.96m pool's only reference is its retail box. Only the context shot used to
+# carry this clause, so the angle shot drew the family printed on the box into the
+# pool. It now travels with every shot.
+PACKAGING = (
+    "The reference may show the product's retail box or packaging instead of the "
+    "product itself. If it does, show the product that the box artwork depicts, "
+    "fully set up, and leave out the box, its wrapping, and every person, prop and "
+    "graphic printed on it."
 )
-CLEANUP = "No text, no watermark, no logo overlay, no border, no collage."
+# "No text" used to sit here next to "match the markings exactly". The two
+# contradict, and the model resolved it by garbling the product's own printing
+# ("Fast Set" came out as "Eltat Scm", "Bestway" as "BESTWAX").
+TEXT = (
+    "The only text allowed in the image is the printing already on the product, "
+    "copied letter for letter from the reference, with the brand name spelled "
+    "exactly as the reference spells it. No other text, caption or overlay."
+)
+# Three of the first six shots were cut off at the edge. "The product large in
+# frame" asked for a close crop while "nothing cropped" asked for the opposite, so
+# the framing is now one measurable rule and no instruction asks for a close crop.
+# People are not banned - a scenery cell can ask for them, as the Bestway row's
+# does - but they have to be whole.
+FRAMING = (
+    "Pull the camera back so the entire product, every edge and corner of it, sits "
+    "inside the image with a clear margin of at least 10% of the image width on "
+    "every side. No part of the product may touch or cross the edge of the image. "
+    "Any person in the scene must be fully and naturally framed, never cut through "
+    "the face or body."
+)
+CLEANUP = "Nothing else in the image: no watermark, no border, no collage, no added logo."
 
-WHITE_BACKDROP = "Place it on a clean seamless white studio backdrop."
+WHITE_BACKDROP = (
+    "Place it on a clean seamless white studio backdrop with nothing else in the "
+    "scene: no people, no props, no other objects."
+)
+# "Richly detailed" invited the model to fill the scene with extras, so the scene
+# is now limited to what the scenery cell names.
 SCENE_TEMPLATE = (
     "Place the product in this setting: {scenery}. "
-    "The setting must be clearly visible, richly detailed and fill the "
-    "background - it is the point of the image, not a blurred suggestion. "
+    "The setting must be clearly visible and fill the background - it is the "
+    "point of the image, not a blurred suggestion. Show only the people, animals "
+    "and objects this setting names, and nothing else. "
     "Light the product to match that setting."
+)
+REVIEWER_NOTE = (
+    "A reviewer rejected the previous version of this image. Fix exactly this and "
+    "change nothing else: {note}"
 )
 
 SHOTS = (
     (
         "angle",
-        "Hero three-quarter view from slightly above, the product large in frame.",
+        "Hero three-quarter view from slightly above.",
     ),
     (
         "context",
         "Wider establishing shot with the product sitting naturally in the scene, "
-        "showing much more of the surroundings around it. If the reference shows "
-        "the product's retail box instead of the product itself, show the product "
-        "that the box artwork depicts, fully set up, and leave the box out.",
+        "showing the surroundings around it.",
     ),
 )
 
@@ -235,15 +265,21 @@ def data_url(path: Path) -> str:
 # --------------------------------------------------------------------------
 
 
-def build_prompt(title: str, scenery: str | None, instruction: str) -> str:
+def build_prompt(
+    title: str, scenery: str | None, instruction: str, note: str | None = None
+) -> str:
     """The text half of one request - the only place prompt wording lives.
 
     The scene clause is emphatic on purpose: the first run returned plain white
     backgrounds, so the setting is now stated as the point of the image rather
-    than mentioned in passing.
+    than mentioned in passing. `note` is a reviewer's correction from the review
+    app; it goes last, where it cannot be buried under the standing rules.
     """
     scene = SCENE_TEMPLATE.format(scenery=scenery.strip().rstrip(".")) if scenery else WHITE_BACKDROP
-    return " ".join([QUALITY, f"Subject: {title}.", FIDELITY, instruction, scene, FRAMING, CLEANUP])
+    parts = [QUALITY, f"Subject: {title}.", FIDELITY, PACKAGING, instruction, scene, FRAMING, TEXT, CLEANUP]
+    if note and note.strip():
+        parts.append(REVIEWER_NOTE.format(note=note.strip()))
+    return " ".join(parts)
 
 
 def build_payload(prompt: str, references: list[Path]) -> dict:

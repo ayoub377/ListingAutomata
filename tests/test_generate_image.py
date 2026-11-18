@@ -137,6 +137,53 @@ def test_build_prompt_does_not_double_the_full_stop() -> None:
     assert ".." not in prompt
 
 
+def test_framing_is_one_measurable_rule_and_nothing_asks_for_a_close_crop() -> None:
+    """Three of the first six shots were cut off: "large in frame" fought "nothing cropped"."""
+    prompt = generate_script.build_prompt("Piscine", "a lawn", "Angle.")
+
+    assert "at least 10%" in prompt
+    assert "touch or cross the edge" in prompt
+    for _, instruction in generate_script.SHOTS:
+        assert "large in frame" not in instruction.lower()
+        assert "close" not in instruction.lower()
+    assert "shallow depth of field" not in prompt  # it blurred the far side of the product
+
+
+def test_the_text_rule_no_longer_contradicts_the_fidelity_rule() -> None:
+    """"No text" next to "match the markings" got `Fast Set` drawn as `Eltat Scm`."""
+    prompt = generate_script.build_prompt("Piscine", None, "Angle.")
+
+    assert "copied letter for letter" in prompt
+    assert "No text," not in prompt
+
+
+@pytest.mark.parametrize("scenery", [None, "a sunny backyard"])
+def test_every_prompt_keeps_packaging_art_out(scenery: str | None) -> None:
+    prompt = generate_script.build_prompt("Piscine", scenery, "Angle.")
+
+    assert "every person, prop and graphic printed on it" in prompt
+
+
+def test_the_scene_only_contains_what_the_scenery_names() -> None:
+    """"Richly detailed" invited extras; a white backdrop must stay empty too."""
+    staged = generate_script.build_prompt("Chaise", "a forest", "Angle.")
+    plain = generate_script.build_prompt("Chaise", None, "Angle.")
+
+    assert "richly detailed" not in staged
+    assert "and nothing else" in staged
+    assert "no people, no props" in plain
+
+
+def test_a_reviewer_note_goes_last_and_a_blank_one_changes_nothing() -> None:
+    base = generate_script.build_prompt("Chaise", "a forest", "Angle.")
+
+    assert generate_script.build_prompt("Chaise", "a forest", "Angle.", note="   ") == base
+    assert generate_script.build_prompt("Chaise", "a forest", "Angle.", note=None) == base
+    noted = generate_script.build_prompt("Chaise", "a forest", "Angle.", note="  the cup holder is missing ")
+    assert noted.startswith(base)
+    assert noted.endswith("change nothing else: the cup holder is missing")
+
+
 def test_shot_instructions_do_not_summon_a_user() -> None:
     """`in use` is what put an unrequested man in the first context render."""
     for _, instruction in generate_script.SHOTS:

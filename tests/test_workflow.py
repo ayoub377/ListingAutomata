@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -506,9 +507,153 @@ def test_description_node_sends_every_generated_image(tmp_path: Path) -> None:
     assert urls == [generate.data_url(path) for path in (reference, angle, context)]
 
 
-def test_context_shot_shows_the_product_not_its_retail_box() -> None:
-    """The pool's only reference is its box, and the model faithfully drew the box."""
-    instruction = dict(generate.SHOTS)["context"].lower()
+def test_every_shot_shows_the_product_not_its_retail_box() -> None:
+    """The pool's only reference is its box. Only the context shot used to say so, and
+    the angle shot drew the family printed on the box into the pool."""
+    for shot, instruction in generate.SHOTS:
+        prompt = generate.build_prompt("Piscine", None, instruction).lower()
 
-    assert "retail box" in instruction
-    assert "leave the box out" in instruction
+        assert "retail box" in prompt, shot
+        assert "leave out the box" in prompt, shot
+
+
+# --------------------------------------------------------------------------
+# Regenerating one part (the review app)
+# --------------------------------------------------------------------------
+
+
+def _fake_generate(monkeypatch, payload: bytes = b"new-image", seen: dict | None = None) -> None:
+    async def fake(client, job, references, api_key, log):
+        if seen is not None:
+            seen["prompt"] = job.prompt
+        return payload
+
+    monkeypatch.setattr(generate, "generate", fake)
+
+
+def _shot_state(**extra) -> dict:
+    return {"name": "chaise", "title": "Chaise Camping", "scenery": "a forest", "shots": ["angle"], **extra}
+
+
+def test_regenerate_shot_replaces_one_shot_and_keeps_the_old_one_in_prev(folders, monkeypatch) -> None:
+    _cutout(folders, "chaise")
+    angle, context = generate.output_path("chaise", "angle"), generate.output_path("chaise", "context")
+    angle.parent.mkdir(parents=True)
+    angle.write_bytes(b"old-angle")
+    context.write_bytes(b"context-untouched")
+    _fake_generate(monkeypatch)
+
+    asyncio.run(workflow.regenerate_shot(_shot_state(), "key"))
+
+    assert angle.read_bytes() == b"new-image"
+    assert workflow.previous_path("chaise", "angle").read_bytes() == b"old-angle"
+    assert context.read_bytes() == b"context-untouched"  # the other shot is not regenerated or billed
+
+
+def test_regenerate_shot_sends_the_reviewers_note_in_the_prompt(folders, monkeypatch) -> None:
+    _cutout(folders, "chaise")
+    seen: dict = {}
+    _fake_generate(monkeypatch, seen=seen)
+
+    asyncio.run(workflow.regenerate_shot(_shot_state(note="The cup holder is missing."), "key"))
+
+    assert seen["prompt"].endswith("change nothing else: The cup holder is missing.")
+
+
+def test_a_failed_regeneration_leaves_the_shot_and_prev_alone(folders, monkeypatch) -> None:
+    _cutout(folders, "chaise")
+    angle = generate.output_path("chaise", "angle")
+    angle.parent.mkdir(parents=True)
+    angle.write_bytes(b"old-angle")
+
+    async def down(*args, **kwargs):
+        raise ValueError("openrouter 500")
+
+    monkeypatch.setattr(generate, "generate", down)
+
+    with pytest.raises(ValueError, match="openrouter 500"):
+        asyncio.run(workflow.regenerate_shot(_shot_state(), "key"))
+
+    assert angle.read_bytes() == b"old-angle"
+    assert not workflow.previous_path("chaise", "angle").exists()
+
+
+def test_regenerate_shot_refuses_anything_but_one_shot(folders) -> None:
+    for shots in ([], ["angle", "context"]):
+        with pytest.raises(ValueError, match="exactly one shot"):
+            asyncio.run(workflow.regenerate_shot(_shot_state(shots=shots), "key"))
+
+
+def test_a_first_regeneration_has_nothing_to_back_up(folders, monkeypatch) -> None:
+    _cutout(folders, "chaise")
+    _fake_generate(monkeypatch)
+
+    asyncio.run(workflow.regenerate_shot(_shot_state(), "key"))
+
+    assert not workflow.previous_path("chaise", "angle").exists()
+
+
+def test_restore_previous_swaps_so_it_can_be_undone_too(folders) -> None:
+    current, backup = generate.output_path("chaise", "angle"), workflow.previous_path("chaise", "angle")
+    backup.parent.mkdir(parents=True)
+    current.write_bytes(b"new")
+    backup.write_bytes(b"old")
+
+    assert workflow.restore_previous("chaise", "angle")
+    assert (current.read_bytes(), backup.read_bytes()) == (b"old", b"new")
+
+    assert workflow.restore_previous("chaise", "angle")
+    assert (current.read_bytes(), backup.read_bytes()) == (b"new", b"old")
+
+
+def test_restore_previous_without_a_backup_does_nothing(folders) -> None:
+    generate.output_path("chaise", "angle").parent.mkdir(parents=True)
+    generate.output_path("chaise", "angle").write_bytes(b"only")
+
+    assert not workflow.restore_previous("chaise", "angle")
+    assert generate.output_path("chaise", "angle").read_bytes() == b"only"
+
+
+def test_description_note_follows_the_standing_instruction(tmp_path: Path) -> None:
+    reference, shot = _jpeg(tmp_path / "ref.jpg"), _jpeg(tmp_path / "shot.jpg")
+
+    plain = workflow.build_description_messages("Chaise", reference, [shot])
+    noted = workflow.build_description_messages("Chaise", reference, [shot], note=" Name the brand exactly. ")
+    blank = workflow.build_description_messages("Chaise", reference, [shot], note="  ")
+
+    assert blank[1].content[0] == plain[1].content[0]
+    text = noted[1].content[0]["text"]
+    assert text.startswith(plain[1].content[0]["text"])
+    assert text.endswith("keep every other rule above: Name the brand exactly.")
+
+
+def test_regenerate_description_rewrites_the_text_and_touches_no_image(folders) -> None:
+    _cutout(folders, "chaise")
+    angle = _jpeg(generate.output_path("chaise", "angle"))
+    before = angle.read_bytes()
+    path = workflow.description_path("chaise")
+    path.write_text(
+        '{"title": "Chaise", "fr": "ancien", "ar": "قديم", "images": ["product_angle.jpg"], "extra": 1}',
+        encoding="utf-8",
+    )
+    llm = FakeLLM(workflow.Description(french="Nouveau texte.", arabic="نص جديد."))
+
+    result = asyncio.run(workflow.regenerate_description("chaise", "Chaise Camping", "Say folding.", llm))
+
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved == result
+    assert (saved["fr"], saved["ar"]) == ("Nouveau texte.", "نص جديد.")
+    assert saved["title"] == "Chaise" and saved["extra"] == 1  # merged, not replaced
+    assert angle.read_bytes() == before
+    assert not path.with_name(path.name + ".tmp").exists()
+    assert "Say folding." in llm.writer.messages[1].content[0]["text"]
+
+
+def test_regenerate_description_needs_a_reference_and_an_image(folders) -> None:
+    llm = FakeLLM(workflow.Description(french="x", arabic="y"))
+    with pytest.raises(ValueError, match="no cutouts"):
+        asyncio.run(workflow.regenerate_description("chaise", "Chaise", None, llm))
+
+    _cutout(folders, "chaise")
+    with pytest.raises(ValueError, match="no staged images"):
+        asyncio.run(workflow.regenerate_description("chaise", "Chaise", None, llm))

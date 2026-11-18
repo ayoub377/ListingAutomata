@@ -30,18 +30,20 @@ Two output files, same data. Field names differ slightly between the Batch API (
   "allow_upsert": true,
   "requests": [
     {
-      "method": "CREATE",
-      "retailer_id": "naturehike-cloud-up-2",
+      "method": "UPDATE",
       "data": {
-        "name": "Naturehike Cloud Up 2 — Ultralight 2-Person Tent",
+        "id": "naturehike-cloud-up-2",
+        "title": "Naturehike Cloud Up 2 — Ultralight 2-Person Tent",
         "description": "…",
         "availability": "in stock",
         "condition": "new",
-        "price": 149900,
-        "currency": "MAD",
-        "url": "https://example.com/naturehike-cloud-up-2",
-        "image_url": "UPLOAD://product-01/01-main.jpg",
-        "additional_image_urls": ["UPLOAD://product-01/02-angle.jpg", "UPLOAD://product-01/03-context.jpg"],
+        "price": "1499.00 MAD",
+        "link": "https://example.com/naturehike-cloud-up-2",
+        "image": [
+          {"url": "UPLOAD://product-01/01-main.jpg"},
+          {"url": "UPLOAD://product-01/02-angle.jpg"},
+          {"url": "UPLOAD://product-01/03-context.jpg"}
+        ],
         "brand": "Naturehike"
       }
     }

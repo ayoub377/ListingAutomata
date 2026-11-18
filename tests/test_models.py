@@ -112,6 +112,32 @@ def test_the_same_folder_twice_is_rejected(tmp_path: Path) -> None:
         load_products_csv(csv_path)
 
 
+def test_two_products_with_the_same_id_are_rejected(tmp_path: Path) -> None:
+    """Titles that slug alike would push the same retailer_id twice."""
+    first = _photo_folder(tmp_path, "chaise-bleue", "a.jpeg")
+    second = _photo_folder(tmp_path, "chaise-rouge", "b.jpeg")
+    csv_path = _write_csv(
+        tmp_path,
+        f"product_folder,title,price\n{first},Chaise Camping,90\n{second},chaise  camping!,95\n",
+    )
+
+    with pytest.raises(ValueError, match=r"rows 2 and 3 both become the product id `chaise-camping`"):
+        load_products_csv(csv_path)
+
+
+def test_an_untitled_row_collides_with_a_titled_one_by_folder_name(tmp_path: Path) -> None:
+    """With no title the id comes from the photo folder, so that can collide too."""
+    titled = _photo_folder(tmp_path, "a", "a.jpeg")
+    untitled = _photo_folder(tmp_path, "Chaise Camping", "b.jpeg")
+    csv_path = _write_csv(
+        tmp_path,
+        f"product_folder,title,price\n{titled},Chaise Camping,90\n{untitled},,95\n",
+    )
+
+    with pytest.raises(ValueError, match="both become the product id `chaise-camping`"):
+        load_products_csv(csv_path)
+
+
 def test_an_unquoted_comma_is_rejected_instead_of_truncating(tmp_path: Path) -> None:
     """DictReader would drop the tail, staging the product in half a scene."""
     folder = _photo_folder(tmp_path, "chaise", "chaise_kass1.jpeg")

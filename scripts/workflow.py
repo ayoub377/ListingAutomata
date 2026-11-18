@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 from functools import lru_cache
 from pathlib import Path
@@ -77,6 +78,12 @@ DESCRIPTION_INSTRUCTION = (
 )
 
 
+DESCRIPTION_NOTE = (
+    "\n\nA reviewer rejected the previous description. Fix exactly this and keep "
+    "every other rule above: {note}"
+)
+
+
 class Description(BaseModel):
     """What the description node must return, in both languages."""
 
@@ -93,6 +100,7 @@ class CatalogState(TypedDict, total=False):
     folder: Path  # the product's photos; segmented into cutouts when none exist yet
     shots: list[str]  # which shots to stage; every shot in generate.SHOTS when omitted
     force: bool
+    note: str | None  # a reviewer's correction, added to the image prompt or description request
     references: list[Path]
     generated_images: list[Path]  # in shot order, hero first
     description_fr: str
@@ -193,7 +201,9 @@ def make_generate_image(api_key: str, log: Path | None = None):
         if destination.is_file() and not state.get("force"):
             return destination
         instruction = dict(generate.SHOTS)[shot]
-        prompt = generate.build_prompt(state["title"], state.get("scenery"), instruction)
+        prompt = generate.build_prompt(
+            state["title"], state.get("scenery"), instruction, note=state.get("note")
+        )
         image = await render(state["name"], shot, prompt, [str(path) for path in references])
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(image)
@@ -219,14 +229,21 @@ def make_generate_image(api_key: str, log: Path | None = None):
 
 
 def build_description_messages(
-    title: str, reference: Path, generated: list[Path]
+    title: str, reference: Path, generated: list[Path], note: str | None = None
 ) -> list[SystemMessage | HumanMessage]:
-    """The vision request: title text, then the reference, then every staged image."""
+    """The vision request: title text, then the reference, then every staged image.
+
+    `note` is a reviewer's correction; it follows the standing instruction so it is
+    the last thing the model reads.
+    """
+    instruction = DESCRIPTION_INSTRUCTION.format(title=title)
+    if note and note.strip():
+        instruction += DESCRIPTION_NOTE.format(note=note.strip())
     return [
         SystemMessage(DESCRIPTION_SYSTEM),
         HumanMessage(
             content=[
-                {"type": "text", "text": DESCRIPTION_INSTRUCTION.format(title=title)},
+                {"type": "text", "text": instruction},
                 {"type": "image_url", "image_url": {"url": generate.data_url(reference)}},
                 *(
                     {"type": "image_url", "image_url": {"url": generate.data_url(image)}}
@@ -247,7 +264,7 @@ def make_write_description(llm):
 
     async def write_description(state: CatalogState) -> CatalogState:
         messages = build_description_messages(
-            state["title"], state["references"][0], state["generated_images"]
+            state["title"], state["references"][0], state["generated_images"], state.get("note")
         )
         result = await writer.ainvoke(messages)
         return {"description_fr": result.french, "description_ar": result.arabic}
@@ -308,6 +325,94 @@ def save_description(state: CatalogState) -> Path:
         encoding="utf-8",
     )
     return destination
+
+
+# --------------------------------------------------------------------------
+# One part at a time (the review app)
+# --------------------------------------------------------------------------
+
+PREVIOUS_DIR = "prev"
+
+
+def previous_path(name: str, shot: str) -> Path:
+    """Where the version a regeneration replaced is kept, so a worse result can be undone."""
+    return generate.OUTPUT_DIR / name / PREVIOUS_DIR / f"product_{shot}.jpg"
+
+
+async def regenerate_shot(state: CatalogState, api_key: str, log: Path | None = None) -> Path:
+    """Re-stage exactly one shot. The description is left as it is.
+
+    The old picture is copied to prev/ only after the new one is on disk, so a
+    failed call (the provider is down, the prompt was refused) leaves the product
+    untouched and no half-finished backup behind.
+    """
+    shots = state.get("shots") or []
+    if len(shots) != 1:
+        raise ValueError(f"regenerate_shot takes exactly one shot, got {shots!r}")
+    destination = generate.output_path(state["name"], shots[0])
+    before = destination.read_bytes() if destination.is_file() else None
+
+    result = await make_generate_image(api_key, log)({**state, "force": True})
+
+    if before is not None:
+        backup = previous_path(state["name"], shots[0])
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        backup.write_bytes(before)
+    return result["generated_images"][0]
+
+
+def restore_previous(name: str, shot: str) -> bool:
+    """Swap a shot with the version it replaced. False when there is nothing to restore.
+
+    A swap rather than a copy, so restoring twice gets the newer picture back.
+    """
+    current, backup = generate.output_path(name, shot), previous_path(name, shot)
+    if not backup.is_file():
+        return False
+    kept = current.read_bytes() if current.is_file() else None
+    current.write_bytes(backup.read_bytes())
+    if kept is None:
+        backup.unlink()
+    else:
+        backup.write_bytes(kept)
+    return True
+
+
+async def regenerate_description(name: str, title: str, note: str | None, llm) -> dict:
+    """Rewrite the FR and AR text from the images already on disk. No image is touched.
+
+    Merged into description.json rather than replacing it, so the title and image
+    list stay. Written through a temp file because the review page re-reads this
+    file every few seconds.
+    """
+    references = generate.reference_cutouts(name)
+    if not references:
+        raise ValueError(f"{name}: no cutouts in {generate.cutout_dir(name)} to describe from")
+    images = [
+        generate.output_path(name, shot)
+        for shot in ALL_SHOTS
+        if generate.output_path(name, shot).is_file()
+    ]
+    if not images:
+        raise ValueError(f"{name}: no staged images in {generate.OUTPUT_DIR / name}")
+
+    result = await make_write_description(llm)(
+        {"name": name, "title": title, "references": references, "generated_images": images, "note": note}
+    )
+
+    path = description_path(name)
+    try:
+        current = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        current = {}
+    current.setdefault("title", title)
+    current.update(
+        {"fr": result["description_fr"], "ar": result["description_ar"], "images": [i.name for i in images]}
+    )
+    temp = path.with_name(path.name + ".tmp")
+    temp.write_text(json.dumps(current, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(temp, path)
+    return current
 
 
 def plan_inputs(

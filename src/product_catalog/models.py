@@ -25,6 +25,8 @@ from pydantic import (
     model_validator,
 )
 
+from product_catalog.naming import product_name
+
 
 PHOTO_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp"})
 PRIMARY_MARKER = "primary"
@@ -199,6 +201,26 @@ class ProductBatch(BaseModel):
                     f"{row.product_folder} is listed twice (rows {seen[key]} and {index})"
                 )
             seen[key] = index
+        return self
+
+    @model_validator(mode="after")
+    def _no_duplicate_names(self) -> Self:
+        """Two rows must not share a product name.
+
+        The name is the Meta `retailer_id` (and the output/ folder), derived from
+        the title, so two rows titled alike - or differing only in case, accents or
+        punctuation - collide and Meta rejects the batch as a duplicate retailer_id.
+        Ids must stay stable between runs, so this refuses instead of renaming one.
+        """
+        seen: dict[str, int] = {}
+        for index, row in enumerate(self.rows, start=2):  # row 1 is the header
+            name = product_name(row)
+            if name in seen:
+                raise ValueError(
+                    f"rows {seen[name]} and {index} both become the product id "
+                    f"`{name}` - give each product a distinct title"
+                )
+            seen[name] = index
         return self
 
     def missing_photos(self) -> list[ProductRow]:

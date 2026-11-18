@@ -80,6 +80,57 @@ def test_optional_fields_are_blank_cells_not_none() -> None:
     assert row["google_product_category"] == ""
 
 
+def test_batch_request_follows_the_items_batch_shape() -> None:
+    """The id lives in `data.id`; a top-level `retailer_id` leaves Meta without one."""
+    request = _meta(
+        brand="Bestway",
+        price=Decimal("1499.50"),
+        image_urls=["https://i/1.jpg", "https://i/2.jpg", "https://i/3.jpg"],
+    ).to_batch_request()
+
+    assert request == {
+        "method": "UPDATE",
+        "data": {
+            "id": "chaise-camping",
+            "title": "Chaise Camping",
+            "description": "Chaise pliante.",
+            "availability": "in stock",
+            "condition": "new",
+            "price": "1499.50 MAD",
+            "link": "https://example.com/chaise",
+            "image": [
+                {"url": "https://i/1.jpg"},
+                {"url": "https://i/2.jpg"},
+                {"url": "https://i/3.jpg"},
+            ],
+            "brand": "Bestway",
+        },
+    }
+
+
+def test_batch_request_leaves_out_blank_optional_fields() -> None:
+    data = _meta().to_batch_request()["data"]
+
+    assert isinstance(data, dict)
+    assert not {"brand", "google_product_category"} & data.keys()
+
+
+def test_batch_payload_upserts_every_listing() -> None:
+    payload = MetaListing.batch_payload([_meta(), _meta(id="autre-chaise")])
+
+    assert payload["allow_upsert"] is True
+    requests = payload["requests"]
+    assert isinstance(requests, list)
+    assert [r["data"]["id"] for r in requests] == ["chaise-camping", "autre-chaise"]
+    assert all("retailer_id" not in r for r in requests)
+
+
+@pytest.mark.parametrize("bad_id", ["Chaise Camping", "chaise_camping", "x" * 101])
+def test_meta_rejects_an_id_that_is_not_a_slug(bad_id: str) -> None:
+    with pytest.raises(ValidationError, match="id must be a slug"):
+        _meta(id=bad_id)
+
+
 def test_meta_rejects_a_title_over_its_limit() -> None:
     with pytest.raises(ValidationError, match="title is over"):
         _meta(title="x" * 201)
