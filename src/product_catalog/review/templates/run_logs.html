@@ -1,0 +1,48 @@
+{% extends "runs_base.html" %}
+{% block title %}Logs {{ run.id }}{% endblock %}
+{% block heading %}Logs for <a class="mono" href="/runs/{{ run.id }}">{{ run.id }}</a>{% endblock %}
+{% block content %}
+<div class="card">
+  <form method="get" class="upload" style="flex-direction:row; flex-wrap:wrap; align-items:end">
+    <label>Level
+      <select name="level">
+        <option value="">all</option>
+        {% for name in levels %}<option value="{{ name }}" {{ 'selected' if filters.level == name }}>{{ name }}+</option>{% endfor %}
+      </select>
+    </label>
+    <label>Product
+      <select name="product">
+        <option value="">all</option>
+        {% for name in products %}<option value="{{ name }}" {{ 'selected' if filters.product == name }}>{{ name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Stage
+      <select name="stage">
+        <option value="">all</option>
+        {% for name in stages %}<option value="{{ name }}" {{ 'selected' if filters.stage == name }}>{{ name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Search <input type="search" name="q" value="{{ filters.q }}" placeholder="text in message or traceback"></label>
+    <button type="submit">Filter</button>
+    <span class="muted">
+      {% if has_log %}<a href="/runs/{{ run.id }}/logs.jsonl">Download .jsonl</a> &middot;{% endif %}
+      <a href="/runs/{{ run.id }}/logs?format=json&{{ qs }}">JSON</a>
+    </span>
+  </form>
+</div>
+
+{% if not has_log %}
+<div class="banner warn">No log file for this run. It may have been pruned (the newest 50 runs are kept).</div>
+{% endif %}
+{% if hidden %}<div class="banner info">Showing the newest {{ events|length }} matching events; {{ hidden }} older ones are in the .jsonl download.</div>{% endif %}
+<p class="muted">Times are UTC. Provider request records (Seedream, PixelVault) are merged in when the page loads; live updates show run events only.</p>
+
+<div class="card" style="padding:0; overflow:auto">
+  <table>
+    <thead><tr><th>Time</th><th>Level</th><th>Product</th><th>Stage</th><th>Event</th><th>Message</th></tr></thead>
+    <tbody id="log-rows">
+      {% include "_log_rows.html" %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

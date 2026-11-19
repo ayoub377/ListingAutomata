@@ -8,6 +8,7 @@ what generation does not: the price, availability and any product link.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
@@ -27,16 +28,28 @@ PREVIOUS_DIR = "prev"
 LANGS = ("fr", "ar")
 
 
+def no_extra_csvs() -> Sequence[Path]:
+    return ()
+
+
 @dataclass(frozen=True)
 class ReviewSettings:
-    """Where the review app reads from."""
+    """Where the review app reads from.
+
+    `extra_csvs` is called on every refresh and returns further CSVs (the files uploaded
+    on the runs page, oldest first). A product in a later file replaces one of the same
+    name in an earlier file, so a re-uploaded price wins over the old one.
+    """
 
     output_dir: Path
     csv_path: Path
+    extra_csvs: Callable[[], Sequence[Path]] = field(default=no_extra_csvs)
 
     @classmethod
-    def from_project(cls, root: Path) -> ReviewSettings:
-        return cls(output_dir=root / "output", csv_path=root / "products.csv")
+    def from_project(
+        cls, root: Path, extra_csvs: Callable[[], Sequence[Path]] = no_extra_csvs
+    ) -> ReviewSettings:
+        return cls(output_dir=root / "output", csv_path=root / "products.csv", extra_csvs=extra_csvs)
 
 
 @dataclass(frozen=True)
@@ -136,13 +149,25 @@ def _image_names(folder: Path, generated: dict) -> tuple[str, ...]:
 
 def discover(settings: ReviewSettings) -> Discovery:
     """Every CSV row that has generated output, plus anything worth telling the reviewer."""
-    try:
-        rows = load_products_csv(settings.csv_path).listings()
-    except (OSError, ValueError) as error:
-        return Discovery([], [str(error)])
+    extras = list(settings.extra_csvs())
+    by_name: dict[str, ProductRow] = {}
+    errors: list[str] = []
+    for path in [settings.csv_path, *extras]:
+        if path == settings.csv_path and extras and not path.exists():
+            continue  # a project that only works from uploads has no products.csv, and that is fine
+        try:
+            loaded = load_products_csv(path).listings()
+        except (OSError, ValueError) as error:
+            errors.append(str(error))
+            continue
+        for row in loaded:
+            by_name[product_name(row)] = row
+    if errors and not by_name:
+        return Discovery([], errors)
+    rows = list(by_name.values())
 
     products: list[ReviewProduct] = []
-    problems: list[str] = []
+    problems: list[str] = list(errors)
     claimed: set[str] = set()
     for row in rows:
         name = product_name(row)

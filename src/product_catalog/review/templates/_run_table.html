@@ -1,0 +1,26 @@
+<div id="run-table"
+     {% if active %}hx-get="/runs/table" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
+  {% if not runs %}
+  <p class="muted">No runs yet.</p>
+  {% else %}
+  <table>
+    <thead><tr><th>Started</th><th>File</th><th>Status</th><th>Products</th><th>Est. cost</th><th></th></tr></thead>
+    <tbody>
+      {% for run in runs %}
+      <tr>
+        <td class="mono">{{ (run.started_at or run.created_at)[:19]|replace('T', ' ') }}</td>
+        <td>{{ run.filename }}</td>
+        <td><span class="badge {{ run.status }}">{{ run.status }}</span></td>
+        <td>
+          {{ run.counts.get('done', 0) }} done{% if run.counts.get('failed') %}, {{ run.counts['failed'] }} failed{% endif %}
+          {% if run.counts.get('skipped') %}, {{ run.counts['skipped'] }} skipped{% endif %}
+          <span class="muted">of {{ run.total }}</span>
+        </td>
+        <td>${{ '%.2f'|format(run.est_cost) }}</td>
+        <td><a href="/runs/{{ run.id }}">Open</a> &middot; <a href="/runs/{{ run.id }}/logs">Logs</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>

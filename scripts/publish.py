@@ -399,7 +399,6 @@ def main(argv: list[str] | None = None) -> int:
 
     config = load_meta_config()
     pixelvault_key = generate.load_keys()[1]
-    logging.info(f" the key is {pixelvault_key}")
     if not args.dry_run:
         needed = {"PIXELVAULT_API_KEY": pixelvault_key}
         if not args.no_push:

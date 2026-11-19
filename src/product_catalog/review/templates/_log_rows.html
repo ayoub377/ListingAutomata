@@ -1,0 +1,21 @@
+{% for e in events %}
+<tr class="lvl-{{ e.level|lower }}">
+  <td class="mono">{{ e.time }}</td>
+  <td>{{ e.level }}</td>
+  <td>{{ e.product }}</td>
+  <td>{{ e.stage }}</td>
+  <td>{{ e.event }}{% if e.source %} <span class="muted">({{ e.source }})</span>{% endif %}</td>
+  <td class="msg">{{ e.msg }}
+    {% if e.extras %}<div class="muted mono">{{ e.extras }}</div>{% endif %}
+    {% if e.traceback %}<details><summary>traceback</summary><pre class="tb">{{ e.traceback }}</pre></details>{% endif %}
+  </td>
+</tr>
+{% endfor %}
+{% if live %}
+<tr id="log-tail" hx-get="/runs/{{ run.id }}/logs?after={{ next_offset }}&{{ qs }}" hx-trigger="load delay:2s"
+    hx-swap="outerHTML" hx-target="this">
+  <td colspan="6" class="muted">live, waiting for new events&hellip;</td>
+</tr>
+{% elif events or next_offset %}
+<tr><td colspan="6" class="muted">Run {{ run.status }}. <a href="/runs/{{ run.id }}/logs?{{ qs }}">Reload</a> to include provider request records.</td></tr>
+{% endif %}

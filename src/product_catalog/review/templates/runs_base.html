@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Runs{% endblock %}</title>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <style>
+    :root {
+      --bg: #f6f7f9; --card: #fff; --line: #e2e5ea; --text: #1d2530; --muted: #667085;
+      --blue: #2563eb; --green: #15803d; --red: #b42318; --amber: #b54708;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
+    header, main { max-width: 1180px; margin: 0 auto; padding: 0 20px; }
+    header { padding-top: 24px; }
+    h1 { margin: 0; font-size: 22px; }
+    h2 { margin: 0 0 10px; font-size: 17px; }
+    nav.top { display: flex; gap: 16px; margin: 6px 0 18px; }
+    nav.top a { color: var(--muted); text-decoration: none; }
+    nav.top a.on { color: var(--text); font-weight: 600; }
+    a { color: var(--blue); }
+    button { font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid var(--line); background: var(--card); padding: 6px 12px; color: var(--text); }
+    button.primary { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 600; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    .banner { border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; border: 1px solid; white-space: pre-wrap; }
+    .banner.warn { background: #fffaeb; border-color: #fedf89; color: var(--amber); }
+    .banner.err { background: #fef3f2; border-color: #fecdca; color: var(--red); }
+    .banner.info { background: #eff8ff; border-color: #b2ddff; color: #175cd3; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+    .muted { color: var(--muted); }
+    .mono { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+    .badge { font-size: 12px; padding: 2px 9px; border-radius: 99px; background: #eef0f3; color: var(--muted); }
+    .badge.succeeded, .badge.done { background: #dcfae6; color: var(--green); }
+    .badge.failed, .badge.interrupted { background: #fee4e2; color: var(--red); }
+    .badge.running, .badge.queued { background: #dbe7ff; color: #1d4ed8; }
+    .badge.partial, .badge.skipped, .badge.preview { background: #fffaeb; color: var(--amber); }
+    form.upload { display: flex; flex-direction: column; gap: 10px; }
+    form.upload .row { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
+    label.check { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+    input, select { font: inherit; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: #fff; }
+    .stats { display: flex; flex-wrap: wrap; gap: 24px; margin: 8px 0 4px; }
+    .stats b { display: block; font-size: 20px; }
+    .htmx-request { opacity: .7; }
+    pre.tb { margin: 6px 0 0; padding: 8px; background: #1d2530; color: #e5e7eb; border-radius: 6px; overflow: auto; font-size: 12px; max-height: 320px; }
+    tr.lvl-error td { background: #fef3f2; }
+    tr.lvl-warning td { background: #fffaeb; }
+    tr.lvl-debug td { color: var(--muted); }
+    td.msg { white-space: pre-wrap; word-break: break-word; }
+    details > summary { cursor: pointer; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>{% block heading %}Runs{% endblock %}</h1>
+    <nav class="top">
+      <a href="/">Review board</a>
+      <a href="/runs" class="{{ 'on' if request.url.path == '/runs' }}">Runs</a>
+      <a href="/logs" class="{{ 'on' if request.url.path == '/logs' }}">App log</a>
+    </nav>
+  </header>
+  <main>{% block content %}{% endblock %}</main>
+</body>
+</html>

@@ -1,0 +1,66 @@
+<div id="run-panel"
+     {% if run.active %}hx-get="/runs/{{ run.id }}/panel" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  {% if notice %}<div class="banner err" role="alert">{{ notice }}</div>{% endif %}
+  {% if run.error %}<div class="banner err">{{ run.error }}</div>{% endif %}
+
+  <div class="card">
+    <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between">
+      <div>
+        <span class="badge {{ run.status }}">{{ run.status }}</span>
+        <strong>{{ run.filename }}</strong>
+        <span class="muted">&middot; shots: {{ run.shots|join(', ') }}{% if run.force %} &middot; regenerating existing{% endif %}</span>
+      </div>
+      <div>
+        {% if has_log %}
+        <a href="/runs/{{ run.id }}/logs">View logs</a> &middot;
+        <a href="/runs/{{ run.id }}/logs.jsonl">Download .jsonl</a>
+        {% endif %}
+        {% if run.status in ('succeeded', 'partial') %} &middot; <a href="/">Review and push on the board</a>{% endif %}
+      </div>
+    </div>
+    <div class="stats">
+      <div><b>{{ run.total }}</b><span class="muted">products</span></div>
+      <div><b>{{ run.counts.get('done', 0) }}</b><span class="muted">done</span></div>
+      <div><b>{{ run.counts.get('failed', 0) }}</b><span class="muted">failed</span></div>
+      <div><b>{{ run.new_images }}</b><span class="muted">new images</span></div>
+      <div><b>${{ '%.2f'|format(run.est_cost) }}</b><span class="muted">estimated cost</span></div>
+    </div>
+    {% if run.batch_id %}
+    <p class="muted" style="margin:8px 0 0">LangSmith batch id <span class="mono">{{ run.batch_id }}</span>
+      (filter traces by metadata <span class="mono">batch_id</span>; shown only when tracing is enabled).</p>
+    {% endif %}
+
+    {% if run.status == 'preview' %}
+    <hr style="border:0; border-top:1px solid var(--line); margin:14px 0">
+    {% if busy %}
+    <div class="banner warn">Run {{ busy }} is still going. Wait for it to finish before starting this one.</div>
+    {% endif %}
+    <p>This will generate <strong>{{ run.new_images }}</strong> new image(s) for about <strong>${{ '%.2f'|format(run.est_cost) }}</strong>.
+       Nothing is pushed to Meta; you approve and push from the review board.</p>
+    <button class="primary" hx-post="/runs/{{ run.id }}/start" hx-target="#run-panel" hx-swap="outerHTML"
+            hx-disabled-elt="this" {% if busy %}disabled{% endif %}>Start run</button>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Products</h2>
+    <table>
+      <thead><tr><th>Product</th><th>Status</th><th>New images</th><th>Notes</th></tr></thead>
+      <tbody>
+        {% for item in items %}
+        <tr>
+          <td>{{ item.product }}{% if item.title %}<div class="muted">{{ item.title }}</div>{% endif %}</td>
+          <td><span class="badge {{ item.status }}">{{ item.status }}</span></td>
+          <td>{{ item.new_images }}</td>
+          <td>
+            {% if item.error %}<span class="{{ 'err' if item.status == 'failed' else 'muted' }}">{{ item.error }}</span>{% endif %}
+            {% if item.status in ('failed', 'running', 'done') and has_log %}
+            <a href="/runs/{{ run.id }}/logs?product={{ item.product|urlencode }}">logs</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>

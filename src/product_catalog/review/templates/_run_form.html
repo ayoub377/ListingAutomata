@@ -1,0 +1,19 @@
+<div class="card" id="upload-card">
+  {% if error %}<div class="banner err" role="alert">{{ error }}</div>{% endif %}
+  <form class="upload" hx-post="/runs" hx-encoding="multipart/form-data" hx-target="#upload-card" hx-swap="outerHTML"
+        hx-disabled-elt="find button">
+    <h2>New run</h2>
+    <div class="row">
+      <input type="file" name="file" accept=".csv,.xlsx" required>
+      <label class="check"><input type="checkbox" name="force" value="true"> Regenerate images already on disk</label>
+    </div>
+    <div class="row">
+      <span class="muted">Shots:</span>
+      {% for shot in shots %}
+      <label class="check"><input type="checkbox" name="shots" value="{{ shot }}" checked> {{ shot }}</label>
+      {% endfor %}
+    </div>
+    <div><button class="primary" type="submit">Upload and preview</button></div>
+    <p class="muted" style="margin:0">Photos are read from each row's <span class="mono">product_folder</span> path on this computer.</p>
+  </form>
+</div>

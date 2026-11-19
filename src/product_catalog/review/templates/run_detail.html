@@ -1,0 +1,6 @@
+{% extends "runs_base.html" %}
+{% block title %}Run {{ run.id }}{% endblock %}
+{% block heading %}Run <span class="mono">{{ run.id }}</span>{% endblock %}
+{% block content %}
+{% include "_run_panel.html" %}
+{% endblock %}

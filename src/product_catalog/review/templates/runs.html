@@ -1,0 +1,11 @@
+{% extends "runs_base.html" %}
+{% block title %}Runs{% endblock %}
+{% block heading %}Runs{% endblock %}
+{% block content %}
+<p class="muted">Upload a CSV or Excel file of products. You see the plan and the cost first, then confirm to start.</p>
+{% include "_run_form.html" %}
+<div class="card">
+  <h2>History</h2>
+  {% include "_run_table.html" %}
+</div>
+{% endblock %}

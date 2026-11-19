@@ -32,6 +32,8 @@ from product_catalog.review.problems import DESCRIPTION_PROBLEMS, IMAGE_PROBLEMS
 from product_catalog.review.publisher import Pusher
 from product_catalog.review.regenerator import Regenerator
 from product_catalog.review.store import Regeneration, Status, now, save_review
+from product_catalog.runs.routes import register_run_routes
+from product_catalog.runs.runner import RunManager
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +105,11 @@ def parse_edit(
 
 
 def create_app(
-    settings: ReviewSettings, pusher: Pusher, regenerator: Regenerator | None = None
+    settings: ReviewSettings,
+    pusher: Pusher,
+    regenerator: Regenerator | None = None,
+    runs: RunManager | None = None,
+    app_log: Path | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Product review", docs_url=None, redoc_url=None, openapi_url=None)
     push_lock = asyncio.Lock()  # one push at a time: no double-clicks, no overlapping Meta batches
@@ -438,5 +444,8 @@ def create_app(
                 notes[name] = message
         summary = f"Pushed {pushed} of {len(names)} approved product(s)." if names else "Nothing approved to push."
         return board(request, view=view, notes=notes, summary=summary)
+
+    if runs is not None:  # upload, run history and logs; see product_catalog/runs
+        register_run_routes(app, runs, TEMPLATES, require_htmx, app_log)
 
     return app

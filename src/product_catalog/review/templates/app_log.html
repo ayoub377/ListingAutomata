@@ -1,0 +1,15 @@
+{% extends "runs_base.html" %}
+{% block title %}App log{% endblock %}
+{% block heading %}App log{% endblock %}
+{% block content %}
+<p class="muted">Startup, upload and recovery messages from the app itself. Secrets are masked. Last {{ count }} lines.
+  <a href="/logs?lines=1000">1000</a> &middot; <a href="/logs?lines=2000">2000</a></p>
+{% if not configured %}
+<div class="banner warn">No app log is configured for this server.</div>
+{% elif not lines %}
+<p class="muted">The log is empty.</p>
+{% else %}
+<pre class="tb" style="max-height:none">{% for line in lines %}{{ line }}
+{% endfor %}</pre>
+{% endif %}
+{% endblock %}
