@@ -1,10 +1,26 @@
+# secrets
 .env
 *.key
-output/*.csv
-output/*.json
-output/*.jsonl
-output/**/*.jpg
+
+# generated data
+output/
+output/**/
+*.csv
+*.json
+*.jsonl
+*.jpg
 images/hosted/
-/.idea
-/.tokensave
-/__pycache__/**
+
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# logs
+*.log
+
+# editor / tooling state (any depth)
+.idea/
+.tokensave/
+.headroom_wrap_marker.json
